@@ -1,12 +1,80 @@
-# Pascal Editor
+# Pascal Editor — AI Construction Building
 
-A 3D building editor built with React Three Fiber and WebGPU.
+A 3D building editor built with React Three Fiber and WebGPU, enhanced with an **AI-powered architectural assistant** that generates buildings, apartments, and interior layouts through natural language.
+
+> **Base project**: [Pascal Editor](https://pascal.build) — an open-source 3D building editor. This fork adds the AI Agent system described below.
 
 
 
 https://github.com/user-attachments/assets/8b50e7cf-cebe-4579-9cf3-8786b35f7b6b
 
 
+
+---
+
+## AI Agent (New Feature)
+
+An AI building architect assistant embedded in the editor. Users describe what they want in natural language (Chinese or English), and the AI generates the 3D building model using function calling.
+
+### How It Works
+
+```
+User: "创建一个两室一厅的公寓，带家具"
+  → AI selects create_furnished_apartment tool
+  → Executor creates walls, slabs, doors, windows, zones, furniture
+  → Spatial validator auto-corrects issues
+  → 3D scene updates in real-time
+```
+
+### Architecture
+
+| Component | File | Role |
+|-----------|------|------|
+| **API Proxy** | `apps/editor/app/api/ai/route.ts` | Server-side OpenAI endpoint |
+| **System Prompt** | `packages/editor/src/lib/agent/system-prompt.ts` | Architectural knowledge + tool selection guidance |
+| **Tool Definitions** | `packages/editor/src/lib/agent/tools.ts` | OpenAI function calling schemas (30+ tools) |
+| **Executor** | `packages/editor/src/lib/agent/executor.ts` | Executes tool calls against the scene store |
+| **Spatial Validator** | `packages/editor/src/lib/agent/spatial-validator.ts` | Auto-corrects spatial issues after each modification |
+| **Agent Store** | `packages/editor/src/store/use-agent.ts` | Zustand store for chat state + agent loop |
+| **Chat Panel** | `packages/editor/src/components/ui/sidebar/panels/agent-panel/` | Chat UI |
+
+### Available AI Tools
+
+| Category | Tools |
+|----------|-------|
+| **Room Creation** | `create_room`, `create_apartment`, `create_furnished_apartment`, `create_l_shaped_room`, `create_polygon_room` |
+| **Structure** | `create_walls`, `create_slab`, `create_ceiling`, `create_roof`, `create_building_shell`, `create_hallway` |
+| **Openings** | `create_door`, `create_window`, `add_door_to_wall`, `add_window_to_wall` |
+| **Furniture** | `place_furniture`, `furnish_room`, `list_furniture`, `place_wall_item`, `place_ceiling_item` |
+| **Editing** | `modify_node`, `batch_modify_nodes`, `move_nodes`, `delete_node`, `mirror_room` |
+| **Levels** | `add_level`, `switch_level`, `delete_level`, `rename_level`, `duplicate_level`, `list_levels` |
+| **Utility** | `get_scene_info`, `undo`, `redo`, `select_node`, `validate_scene`, `delete_all_on_level` |
+
+### Spatial Auto-Correction
+
+The system automatically validates and corrects spatial issues after every scene modification:
+
+- **Wall endpoint snapping** — Endpoints within 5cm are auto-snapped together
+- **Furniture bounds** — Items placed outside room polygon are nudged inside
+- **Door/window clamping** — Positions exceeding wall length are clamped to fit
+- **Gap detection** — Warnings for walls that almost connect but don't
+
+### Furniture Placement
+
+`furnish_room` places furniture using architecturally sensible presets:
+
+- Positions computed within **interior space** (inset by wall thickness + 5cm gap)
+- 6 room types: bedroom, living, kitchen, bathroom, dining, office
+- Furniture placed against walls following real interior design conventions (bed head against wall, sofa facing TV, kitchen counter along back wall, etc.)
+
+### Environment Variables
+
+```env
+OPENAI_API_KEY=sk-...       # Required for AI features
+OPENAI_MODEL=gpt-4o         # Optional, defaults to gpt-4o
+```
+
+---
 
 ## Repository Architecture
 
@@ -401,3 +469,6 @@ npm publish --workspace=@pascal-app/viewer --access public
 | `packages/viewer/src/components/viewer/` | Main Viewer component |
 | `apps/editor/components/tools/` | Editor tools |
 | `apps/editor/store/` | Editor-specific state |
+| `packages/editor/src/lib/agent/` | **AI Agent** — system prompt, tools, executor, spatial validator |
+| `packages/editor/src/store/use-agent.ts` | **AI Agent** — chat state + agent loop |
+| `apps/editor/app/api/ai/route.ts` | **AI Agent** — OpenAI API proxy endpoint |
