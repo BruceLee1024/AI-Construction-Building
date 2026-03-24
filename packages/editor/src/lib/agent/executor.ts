@@ -1129,44 +1129,65 @@ function placeFurniture(args: Record<string, unknown>): string {
 }
 
 // ── Furniture layout presets per room type ──
-// Uses real catalog item IDs
+// dx/dz are normalized 0-1 offsets within the INTERIOR space (after wall inset).
+// 0 = against south/west interior wall face, 1 = against north/east interior wall face, 0.5 = centered.
+// rotation: degrees around Y, 0 = south-facing, 90 = west, 180 = north, 270 = east.
 const ROOM_FURNITURE_PRESETS: Record<
   string,
   Array<{ type: string; dx: number; dz: number; rotation: number }>
 > = {
   bedroom: [
-    { type: 'double-bed', dx: 0.5, dz: 0.55, rotation: 0 },
-    { type: 'bedside-table', dx: 0.1, dz: 0.55, rotation: 0 },
-    { type: 'closet', dx: 0.5, dz: 0.1, rotation: 0 },
-    { type: 'floor-lamp', dx: 0.9, dz: 0.85, rotation: 0 },
+    // Bed: head against back (north) wall, centered X
+    { type: 'double-bed', dx: 0.5, dz: 1.0, rotation: 0 },
+    // Bedside table: left side of bed, near back wall
+    { type: 'bedside-table', dx: 0.05, dz: 0.9, rotation: 0 },
+    // Closet: against left (west) wall, near front
+    { type: 'closet', dx: 0.0, dz: 0.0, rotation: 0 },
+    // Floor lamp: right rear corner
+    { type: 'floor-lamp', dx: 0.95, dz: 0.9, rotation: 0 },
   ],
   living: [
-    { type: 'sofa', dx: 0.5, dz: 0.7, rotation: 0 },
-    { type: 'coffee-table', dx: 0.5, dz: 0.4, rotation: 0 },
-    { type: 'tv-stand', dx: 0.5, dz: 0.1, rotation: 0 },
-    { type: 'floor-lamp', dx: 0.1, dz: 0.85, rotation: 0 },
+    // TV stand: against front (south) wall, centered
+    { type: 'tv-stand', dx: 0.5, dz: 0.0, rotation: 0 },
+    // Sofa: facing TV, in back half of room
+    { type: 'sofa', dx: 0.5, dz: 0.75, rotation: 180 },
+    // Coffee table: between TV and sofa
+    { type: 'coffee-table', dx: 0.5, dz: 0.45, rotation: 0 },
+    // Floor lamp: left rear corner
+    { type: 'floor-lamp', dx: 0.05, dz: 0.9, rotation: 0 },
   ],
   kitchen: [
-    { type: 'kitchen-counter', dx: 0.5, dz: 0.15, rotation: 0 },
-    { type: 'fridge', dx: 0.1, dz: 0.15, rotation: 0 },
-    { type: 'stove', dx: 0.8, dz: 0.15, rotation: 0 },
+    // Kitchen counter: against back (north) wall
+    { type: 'kitchen-counter', dx: 0.5, dz: 1.0, rotation: 180 },
+    // Fridge: left side against back wall
+    { type: 'fridge', dx: 0.0, dz: 1.0, rotation: 180 },
+    // Stove: right side against back wall
+    { type: 'stove', dx: 1.0, dz: 1.0, rotation: 180 },
   ],
   bathroom: [
-    { type: 'toilet', dx: 0.3, dz: 0.25, rotation: 0 },
-    { type: 'bathroom-sink', dx: 0.7, dz: 0.15, rotation: 0 },
-    { type: 'washing-machine', dx: 0.7, dz: 0.75, rotation: 180 },
+    // Toilet: against back (north) wall, left side
+    { type: 'toilet', dx: 0.2, dz: 1.0, rotation: 180 },
+    // Sink: against back wall, right side
+    { type: 'bathroom-sink', dx: 0.75, dz: 1.0, rotation: 180 },
+    // Washing machine: against left (west) wall, near front
+    { type: 'washing-machine', dx: 0.0, dz: 0.0, rotation: 0 },
   ],
   dining: [
+    // Dining table: centered in room
     { type: 'dining-table', dx: 0.5, dz: 0.5, rotation: 0 },
-    { type: 'dining-chair', dx: 0.3, dz: 0.3, rotation: 0 },
-    { type: 'dining-chair', dx: 0.7, dz: 0.3, rotation: 0 },
-    { type: 'dining-chair', dx: 0.3, dz: 0.7, rotation: 180 },
-    { type: 'dining-chair', dx: 0.7, dz: 0.7, rotation: 180 },
+    // 4 chairs around table
+    { type: 'dining-chair', dx: 0.25, dz: 0.3, rotation: 0 },
+    { type: 'dining-chair', dx: 0.75, dz: 0.3, rotation: 0 },
+    { type: 'dining-chair', dx: 0.25, dz: 0.7, rotation: 180 },
+    { type: 'dining-chair', dx: 0.75, dz: 0.7, rotation: 180 },
   ],
   office: [
-    { type: 'office-table', dx: 0.5, dz: 0.8, rotation: 180 },
-    { type: 'office-chair', dx: 0.5, dz: 0.5, rotation: 0 },
-    { type: 'bookshelf', dx: 0.1, dz: 0.1, rotation: 0 },
+    // Desk: against back (north) wall, centered
+    { type: 'office-table', dx: 0.5, dz: 1.0, rotation: 180 },
+    // Chair: in front of desk
+    { type: 'office-chair', dx: 0.5, dz: 0.6, rotation: 0 },
+    // Bookshelf: against left (west) wall
+    { type: 'bookshelf', dx: 0.0, dz: 0.5, rotation: 0 },
   ],
 }
 
@@ -1175,6 +1196,7 @@ function furnishRoom(args: Record<string, unknown>): string {
   const origin = (args.origin as [number, number]) ?? [0, 0]
   const width = (args.width as number) ?? 5
   const depth = (args.depth as number) ?? 4
+  const wallThickness = (args.wallThickness as number) ?? 0.15
 
   const preset = ROOM_FURNITURE_PRESETS[roomType]
   if (!preset) {
@@ -1184,19 +1206,32 @@ function furnishRoom(args: Record<string, unknown>): string {
     })
   }
 
-  const [ox, oz] = origin
+  // Compute interior bounds (inset from outer walls by wall thickness + gap)
+  const gap = 0.05 // 5cm clearance from wall interior face
+  const inset = wallThickness + gap
+  const interiorW = Math.max(0.5, width - inset * 2)
+  const interiorD = Math.max(0.5, depth - inset * 2)
+  const interiorOx = origin[0] + inset
+  const interiorOz = origin[1] + inset
+
   const placed: unknown[] = []
 
   for (const presetItem of preset) {
     const catalogEntry = findCatalogItem(presetItem.type)
     if (!catalogEntry) continue
 
-    // Convert normalized (0-1) offsets to actual room coordinates
+    // Convert normalized (0-1) offsets to INTERIOR coordinates
     const dims = catalogEntry.dimensions ?? [1, 1, 1]
-    const fw = dims[0]
-    const fd = dims[2]
-    const x = ox + presetItem.dx * (width - fw) + fw / 2
-    const z = oz + presetItem.dz * (depth - fd) + fd / 2
+    const fw = dims[0] // furniture width (X)
+    const fd = dims[2] // furniture depth (Z)
+
+    // dx=0 → furniture flush against west interior wall
+    // dx=1 → furniture flush against east interior wall
+    // dx=0.5 → centered
+    const availX = Math.max(0, interiorW - fw)
+    const availZ = Math.max(0, interiorD - fd)
+    const x = interiorOx + presetItem.dx * availX + fw / 2
+    const z = interiorOz + presetItem.dz * availZ + fd / 2
 
     const result = JSON.parse(
       placeFurniture({
@@ -1436,6 +1471,7 @@ function createFurnishedApartment(args: Record<string, unknown>): string {
           origin: [curX, curZ],
           width: room.width,
           depth: room.depth,
+          wallThickness,
         }),
       )
     }

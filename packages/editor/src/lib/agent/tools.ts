@@ -753,6 +753,10 @@ export const agentTools: ChatCompletionTool[] = [
             type: 'number',
             description: 'Room depth along Z axis in meters (default: 4)',
           },
+          wallThickness: {
+            type: 'number',
+            description: 'Wall thickness in meters (default: 0.15). Used to compute interior space for furniture placement.',
+          },
         },
         required: ['roomType'],
       },
