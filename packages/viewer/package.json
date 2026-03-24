@@ -1,0 +1,59 @@
+{
+  "name": "@pascal-app/viewer",
+  "version": "0.2.0",
+  "description": "3D viewer component for Pascal building editor",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc --build",
+    "dev": "tsc --build --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "@pascal-app/core": "^0.1.4",
+    "@react-three/drei": "^10",
+    "@react-three/fiber": "^9",
+    "react": "^18 || ^19",
+    "three": "^0.183"
+  },
+  "dependencies": {
+    "polygon-clipping": "^0.15.7",
+    "zustand": "^5"
+  },
+  "devDependencies": {
+    "@pascal/typescript-config": "*",
+    "@types/react": "^19.2.2",
+    "typescript": "5.9.3",
+    "@types/three": "^0.183.0"
+  },
+  "keywords": [
+    "3d",
+    "building",
+    "editor",
+    "viewer",
+    "architecture",
+    "webgpu",
+    "three.js",
+    "react-three-fiber"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pascalorg/editor.git",
+    "directory": "packages/viewer"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/pascalorg/editor/tree/main/packages/viewer#readme",
+  "bugs": "https://github.com/pascalorg/editor/issues"
+}
