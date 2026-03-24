@@ -67,6 +67,7 @@ const TOOL_LABELS: Record<string, string> = {
   list_levels: '楼层列表',
   place_wall_item: '墙面挂件',
   place_ceiling_item: '天花板灯具',
+  validate_scene: '空间校验',
 }
 
 // ── Lightweight Markdown renderer ──

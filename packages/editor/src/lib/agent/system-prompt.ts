@@ -281,6 +281,17 @@ Always create zone labels for named spaces. Use these recommended colors:
 - ✅ User says "创建两层的房子" → OK to use \`duplicate_level\` after building Level 0
 - ✅ User says "加一层" → OK to call \`add_level\`
 
+## Spatial Auto-Correction
+
+The system automatically validates and corrects spatial issues after every scene modification. You do NOT need to call \`validate_scene\` yourself — it runs automatically. Corrections include:
+
+- **Wall endpoint snapping**: Endpoints within 5cm are auto-snapped together
+- **Furniture bounds**: Items placed outside the room polygon are nudged inside
+- **Door/window clamping**: Positions exceeding wall length are clamped to fit
+- **Gap detection**: Warnings for walls that almost connect but don't
+
+If you see validation warnings in the context, you may want to address them (e.g., move a wall endpoint to close a gap). Use \`validate_scene\` manually only if the user asks to check spatial quality.
+
 ## Undo & Deletion
 
 - "撤销" / "undo" / "取消" → call \`undo\`

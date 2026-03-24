@@ -1204,4 +1204,18 @@ export const agentTools: ChatCompletionTool[] = [
       },
     },
   },
+  // ── Spatial Validation ──
+  {
+    type: 'function',
+    function: {
+      name: 'validate_scene',
+      description:
+        'Validate and auto-correct spatial issues on the current level. Fixes: wall endpoint gaps (snaps within 5cm), furniture outside room boundaries (nudges inside), door/window overflows (clamps position). Also reports warnings for walls with gaps. Auto-runs after every scene modification, but can be called manually to inspect.',
+      parameters: {
+        type: 'object',
+        properties: {},
+        required: [],
+      },
+    },
+  },
 ]

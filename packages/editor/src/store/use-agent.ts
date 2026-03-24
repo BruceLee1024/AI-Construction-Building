@@ -4,6 +4,17 @@ import { SYSTEM_PROMPT } from '../lib/agent/system-prompt'
 import { agentTools } from '../lib/agent/tools'
 import { executeToolCall } from '../lib/agent/executor'
 
+// Tools that modify the scene and should trigger auto-validation
+const SCENE_MODIFYING_TOOLS = new Set([
+  'create_walls', 'create_slab', 'create_door', 'create_window', 'create_room',
+  'create_ceiling', 'create_zone', 'create_roof', 'create_apartment',
+  'create_l_shaped_room', 'create_polygon_room', 'create_hallway',
+  'create_building_shell', 'create_furnished_apartment', 'mirror_room',
+  'place_furniture', 'furnish_room', 'move_nodes', 'modify_node',
+  'batch_modify_nodes', 'add_door_to_wall', 'add_window_to_wall',
+  'place_wall_item', 'place_ceiling_item', 'duplicate_level',
+])
+
 export type AIProvider = 'openai' | 'deepseek'
 
 export interface ChatMessage {
@@ -181,9 +192,11 @@ async function runAgentLoop(
       })
 
       // Execute each tool call
+      let hasSceneModification = false
       for (const tc of toolCalls) {
         const toolArgs = JSON.parse(tc.arguments)
         const result = executeToolCall(tc.name, toolArgs)
+        if (SCENE_MODIFYING_TOOLS.has(tc.name)) hasSceneModification = true
 
         const toolMsg: ChatMessage = {
           id: genId(),
@@ -195,6 +208,27 @@ async function runAgentLoop(
         set((s) => ({
           messages: [...s.messages, toolMsg],
         }))
+      }
+
+      // Auto-validate after scene modifications
+      if (hasSceneModification) {
+        const validationResult = executeToolCall('validate_scene', {})
+        try {
+          const parsed = JSON.parse(validationResult)
+          if (parsed.fixedCount > 0 || parsed.warningCount > 0) {
+            // Inject validation report as a system-level context message
+            const validationMsg: ChatMessage = {
+              id: genId(),
+              role: 'system',
+              content: `[Auto-Validation] ${parsed.fixedCount} issue(s) auto-fixed, ${parsed.warningCount} warning(s). Details: ${validationResult}`,
+            }
+            set((s) => ({
+              messages: [...s.messages, validationMsg],
+            }))
+          }
+        } catch {
+          // Validation parsing failed — silently continue
+        }
       }
 
       // Continue — model needs to see tool results

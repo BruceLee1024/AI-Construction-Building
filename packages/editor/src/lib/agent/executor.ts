@@ -15,6 +15,7 @@ import {
 import { useViewer } from '@pascal-app/viewer'
 import type { AnyNode, AnyNodeId } from '@pascal-app/core'
 import { CATALOG_ITEMS } from '../../components/ui/item-catalog/catalog-items'
+import { validateAndCorrectScene, formatValidationReport } from './spatial-validator'
 
 // Track recently created wall IDs so door/window placement can reference them by index
 let recentWallIds: string[] = []
@@ -120,6 +121,8 @@ export function executeToolCall(
         return placeWallItem(args)
       case 'place_ceiling_item':
         return placeCeilingItem(args)
+      case 'validate_scene':
+        return validateScene()
       default:
         return JSON.stringify({ error: `Unknown tool: ${name}` })
     }
@@ -2003,4 +2006,10 @@ function placeCeilingItem(args: Record<string, unknown>): string {
     parentId,
     position,
   })
+}
+
+function validateScene(): string {
+  const levelId = getLevelId()
+  const result = validateAndCorrectScene(levelId)
+  return formatValidationReport(result)
 }
