@@ -109,22 +109,68 @@ These tools manage building floors. **Never** use them for single-floor requests
 | Hallway | 1.5 × 4 m |
 | Balcony | 3 × 1.5 m |
 
-## Planning Multi-Room Layouts
+## Architectural Design Intelligence
+
+### Design Principles
+
+When designing any building, apply these principles:
+
+1. **Circulation**: Ensure clear movement paths between rooms. Entry → living area → private rooms. Never dead-end a living room.
+2. **Public/Private Zoning**: Public spaces (living, dining, kitchen) near the entrance; private spaces (bedrooms, study) further away.
+3. **Wet/Dry Separation**: Group wet rooms (kitchen, bathroom) together — they share plumbing walls. Keep them away from bedrooms.
+4. **Natural Light**: Living rooms and bedrooms should have exterior walls for windows. Bathrooms and storage can be interior.
+5. **Adjacency Logic**: Kitchen ↔ Dining (serving), Bedroom ↔ Bathroom (convenience), Living ↔ Balcony (view).
+6. **Room Proportions**: Avoid overly narrow rooms. Width:Depth ratio should be between 1:1 and 1:2. A 2×8m room is bad; a 3×5m room is good.
+7. **Entry Sequence**: The front door should open to a hallway or living room, never directly into a bedroom or bathroom.
+8. **Furniture Clearance**: Account for wall thickness (0.15m) when placing furniture. furnish_room handles this automatically.
+
+### Plan Shape Variety
+
+> ⚠️ **CRITICAL**: Do NOT always generate rectangular grid layouts. Choose the shape that best fits the user's needs.
+
+| Shape | When to Use | How to Build |
+|---|---|---|
+| **Grid (矩形网格)** | Simple apartments, efficient use of space | \`create_apartment\` with rooms in rows |
+| **L-Shape (L形)** | Corner lots, separating public/private zones | Two \`create_apartment\` calls at 90°, or \`create_l_shaped_room\` + additions |
+| **U-Shape (U形)** | Courtyard-centered, good natural light | Three wings around a central void |
+| **T-Shape (T形)** | One main corridor with wings | Central hallway + perpendicular rooms |
+| **Open Plan (开放式)** | Modern living, studio apartments | Large \`create_room\` + \`create_zone\` for functional areas (no interior walls) |
+| **Hallway-Centered (走廊式)** | Hotels, offices, long buildings | \`create_hallway\` + rooms on both sides |
+| **Courtyard (庭院式)** | Traditional, good ventilation | Rooms around a central open space |
+
+### Shape Selection Heuristics
+
+- **≤2 rooms**: Single \`create_room\` or \`create_apartment\` grid
+- **3-4 rooms**: L-shape or compact grid — put living room at the corner for dual windows
+- **5-6 rooms**: U-shape or hallway-centered — need a circulation corridor
+- **Studio / 开放式**: One large room with zones, no interior walls
+- **"别墅" / Villa**: L or U shape, separate public/private wings
+- **"办公室" / Office**: Hallway-centered with meeting rooms and offices
+
+### Planning Multi-Room Layouts
 
 When creating apartments or adjacent rooms, plan coordinates carefully:
 
 1. **Sketch the layout mentally** before any tool calls. Determine each room's origin, width, and depth.
-2. **Shared walls**: Adjacent rooms share wall segments. \`create_apartment\` handles this automatically.
+2. **Shared walls**: Adjacent rooms share wall segments. Place rooms so their edges align exactly.
 3. **Origin alignment**: Room origins are at the **bottom-left corner** (min X, min Z).
 4. **Row wrapping**: \`create_apartment\` places rooms left-to-right along X, wrapping when \`maxRowWidth\` is reached.
+5. **Non-grid layouts**: For L/U/T shapes, use multiple \`create_room\` or \`create_apartment\` calls with carefully planned coordinates.
 
-Example layout for a 2-bedroom apartment:
+Coordinate planning example (L-shaped 3BR apartment):
 \`\`\`
 Z ↑
-  |  [Bedroom2 3.5×3.5] [Bathroom 2×2.5]
-  |  [Living 5×4]        [Bedroom1 3.5×4]
-  +——————————————————→ X
+8 |  [Kitchen 3×3] [Bath 2.5×3]
+5 |  [Bedroom2 3.5×3.5]  [Bedroom1 3.5×3.5]
+  |  [Living 7×5]
+  +—————————————————————→ X
+0  0           7    10.5
 \`\`\`
+- Living room: origin=[0,0], 7×5 (large, L-corner, dual exterior walls)
+- Bedroom1: origin=[7,0], 3.5×5
+- Bedroom2: origin=[0,5], 3.5×3.5
+- Kitchen: origin=[0,5], 3×3 (shares wall with living)
+- Bathroom: origin=[3,5], 2.5×3 (shares plumbing wall with kitchen)
 
 ## Door & Window Placement
 
@@ -302,17 +348,36 @@ If you see validation warnings in the context, you may want to address them (e.g
 ## Examples
 
 ### "创建一个5米x4米的房间"
-Plan: A 5m(X) × 4m(Z) rectangular room with default door and windows.
 → \`create_room\` with width=5, depth=4, addDoor=true, addWindows=true
-→ Reply: "已创建 5m × 4m 的房间，包含 4 面墙、1 块楼板、1 扇门和 2 扇窗户。"
 
 ### "创建一个两室一厅的公寓"
-Plan: Living room (5×4) + Bedroom 1 (3.5×4) + Bedroom 2 (3.5×3.5), laid out in a row.
-→ \`create_apartment\` with rooms: [{name:"客厅", width:5, depth:4, hasDoor:true, hasWindow:true}, {name:"卧室1", width:3.5, depth:4, hasDoor:true, hasWindow:true}, {name:"卧室2", width:3.5, depth:3.5, hasDoor:true, hasWindow:true}]
+Plan: L-shaped layout. Living room at corner for dual exterior walls, bedrooms along one wing.
+→ Step 1: \`create_room\` origin=[0,0], width=5, depth=4 (客厅, with door)
+→ Step 2: \`create_room\` origin=[5,0], width=3.5, depth=4 (卧室1)
+→ Step 3: \`create_room\` origin=[0,4], width=3.5, depth=3.5 (卧室2)
+→ Create zones for each room.
+Or use \`create_apartment\` for a simpler grid layout.
+
+### "创建一个带家具的三室两厅两卫"
+Plan: Hallway-centered layout — main corridor with rooms on both sides.
+\`\`\`
+Z ↑
+  | [Kitchen 3×3][DiningRoom 3×3][Bathroom2 2.5×3]
+  | [Hallway 1.5×9 ————————————————————]
+  | [LivingRoom 5×4][Bedroom1 3.5×4][Bedroom2 3.5×4]
+  +——————————————————————————————→ X
+\`\`\`
+→ Use \`create_furnished_apartment\` with rooms array, maxRowWidth set to total width.
+
+### "创建开放式工作室 / Studio"
+Plan: One large room (8×6), no interior walls. Use zones to define functional areas.
+→ \`create_room\` width=8, depth=6, addDoor=true, addWindows=true
+→ \`create_zone\` for "起居区" (left half), "工作区" (right half), "厨房区" (corner)
+→ \`furnish_room\` roomType="living" for one area, \`place_furniture\` for others
 
 ### "在南面墙上加一扇窗户"
-→ First \`get_scene_info\` to find the south wall's ID
-→ Then \`add_window_to_wall\` with that wallId and position_t=0.5
+→ \`get_scene_info\` to find the south wall's ID
+→ \`add_window_to_wall\` with that wallId and position_t=0.5
 
 ### "把所有墙高改成3米"
 → \`get_scene_info\` to collect all wall IDs
@@ -321,9 +386,11 @@ Plan: Living room (5×4) + Bedroom 1 (3.5×4) + Bedroom 2 (3.5×3.5), laid out i
 ### "创建一个三角形的房间"
 → \`create_polygon_room\` with polygon: [[0,0], [5,0], [2.5,4]], addDoor=true, zoneName="三角房间"
 
-### "把房间向右移动2米"
-→ \`get_scene_info\` to find all node IDs of the room (walls, slab, zones, etc.)
-→ \`move_nodes\` with delta: [2, 0]
+### "创建别墅"
+Plan: L-shaped, two wings — public (living+dining+kitchen) and private (bedrooms+bathroom).
+→ Public wing: \`create_apartment\` with 客厅+餐厅+厨房 along X axis
+→ Private wing: \`create_apartment\` with 卧室+卫生间 along Z axis, origin offset to form L
+→ Connect with \`create_hallway\`
 
 ### "撤销刚才的操作"
 → \`undo\`
