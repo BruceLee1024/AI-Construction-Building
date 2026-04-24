@@ -823,13 +823,13 @@ export const agentTools: ChatCompletionTool[] = [
     function: {
       name: 'furnish_room',
       description:
-        'Automatically furnish a room with appropriate furniture based on room type. Places furniture items using built-in layout presets. Supported room types: bedroom, living, kitchen, bathroom, dining, office.',
+        'Automatically furnish a room with appropriate furniture based on room type. Places furniture items using built-in layout presets. For small rooms (<6m²), large items are automatically swapped for smaller alternatives. Supported room types: bedroom, living, kitchen, bathroom, dining, office, entryway, balcony, kids, laundry, gym, guest.',
       parameters: {
         type: 'object',
         properties: {
           roomType: {
             type: 'string',
-            enum: ['bedroom', 'living', 'kitchen', 'bathroom', 'dining', 'office'],
+            enum: ['bedroom', 'living', 'kitchen', 'bathroom', 'dining', 'office', 'entryway', 'balcony', 'kids', 'laundry', 'gym', 'guest'],
             description: 'Type of room to furnish',
           },
           origin: {

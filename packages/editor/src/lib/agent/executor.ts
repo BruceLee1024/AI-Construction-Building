@@ -788,6 +788,69 @@ function getSceneInfo(): string {
         }))
     : []
 
+  // Build per-room spatial summaries from slabs
+  const roomSummaries: Array<{
+    slabId: string
+    zoneName: string | null
+    bounds: { minX: number; minZ: number; maxX: number; maxZ: number }
+    area: number
+    furniture: Array<{ id: string; name: string; catalogId: string }>
+  }> = []
+
+  // Collect slab polygons for room detection
+  const slabPolygons: Array<{ id: string; polygon: [number, number][] }> = []
+  for (const node of Object.values(nodes)) {
+    if (node.type === 'slab' && (node.parentId === levelId || isChildOfLevel(node, nodes, levelId))) {
+      const s = node as unknown as { id: string; polygon: [number, number][] }
+      if (s.polygon) slabPolygons.push({ id: s.id, polygon: s.polygon })
+    }
+  }
+
+  for (const slab of slabPolygons) {
+    const xs = slab.polygon.map((p) => p[0])
+    const zs = slab.polygon.map((p) => p[1])
+    const minX = round3(Math.min(...xs))
+    const minZ = round3(Math.min(...zs))
+    const maxX = round3(Math.max(...xs))
+    const maxZ = round3(Math.max(...zs))
+    // Compute area via shoelace formula
+    let area = 0
+    for (let i = 0, j = slab.polygon.length - 1; i < slab.polygon.length; j = i++) {
+      area += (slab.polygon[j]![0] + slab.polygon[i]![0]) * (slab.polygon[j]![1] - slab.polygon[i]![1])
+    }
+    area = round3(Math.abs(area) / 2)
+
+    // Find zone name overlapping this slab
+    let zoneName: string | null = null
+    for (const z of zones) {
+      const zNode = nodes[z.id as AnyNodeId] as unknown as { polygon?: [number, number][] }
+      if (zNode?.polygon) {
+        const zCentroid = [
+          zNode.polygon.reduce((s, p) => s + p[0], 0) / zNode.polygon.length,
+          zNode.polygon.reduce((s, p) => s + p[1], 0) / zNode.polygon.length,
+        ]
+        if (pointInPolygonSimple(zCentroid[0]!, zCentroid[1]!, slab.polygon)) {
+          zoneName = z.name as string
+          break
+        }
+      }
+    }
+
+    // Find furniture items inside this slab
+    const containedItems = items.filter((itm) => {
+      const pos = itm.position as [number, number, number]
+      return pos && pointInPolygonSimple(pos[0], pos[2], slab.polygon)
+    }).map((itm) => ({ id: itm.id, name: itm.name, catalogId: itm.catalogId }))
+
+    roomSummaries.push({
+      slabId: slab.id,
+      zoneName,
+      bounds: { minX, minZ, maxX, maxZ },
+      area,
+      furniture: containedItems,
+    })
+  }
+
   // Summary counts + details
   return JSON.stringify({
     levelId,
@@ -801,9 +864,11 @@ function getSceneInfo(): string {
       zones: zones.length,
       roofs: roofs.length,
       items: items.length,
+      rooms: roomSummaries.length,
       isEmpty: walls.length === 0 && slabs.length === 0,
     },
     allLevels,
+    roomSummaries,
     wallDetails: walls,
     doorDetails: doors,
     windowDetails: windows,
@@ -1206,6 +1271,38 @@ function placeFurniture(args: Record<string, unknown>): string {
     }
   }
 
+  // Check collisions with existing furniture items on the same level
+  const collisions: Array<{ itemId: string; name: string; overlapArea: number }> = []
+  for (const node of Object.values(nodes)) {
+    const n = node as unknown as { id: string; type: string; position?: [number, number, number]; asset?: { id?: string; name?: string; dimensions?: [number, number, number] }; rotation?: [number, number, number]; parentId?: string }
+    if (n.type !== 'item' || n.id === item.id) continue
+    if (!n.position || !n.asset?.dimensions) continue
+    // Compute other item's bbox
+    const oDims = n.asset.dimensions
+    const oRotRad = n.rotation?.[1] ?? 0
+    const oRotDeg = ((Math.round((oRotRad * 180) / Math.PI) % 360) + 360) % 360
+    const oIsRot = oRotDeg === 90 || oRotDeg === 270
+    const oW = oIsRot ? oDims[2] : oDims[0]
+    const oD = oIsRot ? oDims[0] : oDims[2]
+    const oBbox = {
+      minX: n.position[0] - oW / 2,
+      minZ: n.position[2] - oD / 2,
+      maxX: n.position[0] + oW / 2,
+      maxZ: n.position[2] + oD / 2,
+    }
+    // AABB overlap test
+    const overlapX = Math.max(0, Math.min(bbox.maxX, oBbox.maxX) - Math.max(bbox.minX, oBbox.minX))
+    const overlapZ = Math.max(0, Math.min(bbox.maxZ, oBbox.maxZ) - Math.max(bbox.minZ, oBbox.minZ))
+    const overlapArea = round3(overlapX * overlapZ)
+    if (overlapArea > 0.01) { // > 1cm² overlap
+      collisions.push({ itemId: n.id, name: n.asset.name ?? n.asset.id ?? 'unknown', overlapArea })
+    }
+  }
+
+  const warnings: string[] = []
+  if (!insideRoom) warnings.push('⚠️ Item center is NOT inside any room slab!')
+  if (collisions.length > 0) warnings.push(`⚠️ Overlaps with ${collisions.length} item(s): ${collisions.map((c) => c.name).join(', ')}`)
+
   return JSON.stringify({
     success: true,
     itemId: item.id,
@@ -1215,7 +1312,8 @@ function placeFurniture(args: Record<string, unknown>): string {
     position,
     bbox,
     insideSlabId: insideRoom,
-    warning: insideRoom ? undefined : '⚠️ Item center is NOT inside any room slab!',
+    collisions: collisions.length > 0 ? collisions : undefined,
+    warning: warnings.length > 0 ? warnings.join(' | ') : undefined,
   })
 }
 
@@ -1474,7 +1572,71 @@ const ROOM_FURNITURE_PRESETS: Record<
     // Bookshelf: against left (west) wall
     { type: 'bookshelf', dx: 0.0, dz: 0.5, rotation: 0 },
   ],
+  entryway: [
+    // Coat rack: near the entrance (south wall)
+    { type: 'coat-rack', dx: 0.1, dz: 0.0, rotation: 0 },
+    // Shoe shelf: against left wall
+    { type: 'shelf', dx: 0.0, dz: 0.5, rotation: 0 },
+    // Small plant: right side
+    { type: 'small-indoor-plant', dx: 0.9, dz: 0.0, rotation: 0 },
+  ],
+  balcony: [
+    // Indoor plant: left corner
+    { type: 'indoor-plant', dx: 0.1, dz: 0.9, rotation: 0 },
+    // Small plant: right corner
+    { type: 'small-indoor-plant', dx: 0.9, dz: 0.9, rotation: 0 },
+    // Lounge chair: centered
+    { type: 'lounge-chair', dx: 0.5, dz: 0.4, rotation: 0 },
+  ],
+  kids: [
+    // Single bed: head against north wall
+    { type: 'single-bed', dx: 0.5, dz: 1.0, rotation: 0 },
+    // Toy: on the floor, center-left
+    { type: 'toy', dx: 0.3, dz: 0.4, rotation: 0 },
+    // Dresser: against west wall
+    { type: 'dresser', dx: 0.0, dz: 0.3, rotation: 0 },
+    // Bookshelf: against east wall
+    { type: 'bookshelf', dx: 1.0, dz: 0.5, rotation: 0 },
+  ],
+  laundry: [
+    // Washing machine: back wall, left
+    { type: 'washing-machine', dx: 0.2, dz: 1.0, rotation: 180 },
+    // Ironing board: center
+    { type: 'ironing-board', dx: 0.5, dz: 0.4, rotation: 0 },
+    // Drying rack: back wall, right
+    { type: 'drying-rack', dx: 0.8, dz: 1.0, rotation: 180 },
+  ],
+  gym: [
+    // Treadmill: against back wall, centered
+    { type: 'threadmill', dx: 0.5, dz: 0.9, rotation: 180 },
+    // Barbell stand: left side
+    { type: 'barbell-stand', dx: 0.1, dz: 0.3, rotation: 0 },
+  ],
+  guest: [
+    // Single bed: head against north wall, centered
+    { type: 'single-bed', dx: 0.5, dz: 1.0, rotation: 0 },
+    // Bedside table: right side of bed
+    { type: 'bedside-table', dx: 0.9, dz: 0.9, rotation: 0 },
+    // Floor lamp: left corner
+    { type: 'floor-lamp', dx: 0.05, dz: 0.9, rotation: 0 },
+  ],
 }
+
+// Small-room substitution: when room area < threshold, swap large items for smaller ones
+const SMALL_ROOM_SUBSTITUTIONS: Record<string, string> = {
+  'double-bed': 'single-bed',
+  'sofa': 'lounge-chair',
+  'bathtub': 'shower-square',
+  'bathroom-sink': 'toilet', // skip sink if too small
+  'dining-table': 'coffee-table',
+  'coffee-table': 'stool',
+  'kitchen-counter': 'kitchen-cabinet',
+  'closet': 'dresser',
+  'bookshelf': 'shelf',
+  'indoor-plant': 'small-indoor-plant',
+  'ironing-board': 'laundry-bag',
+}
+const SMALL_ROOM_AREA_THRESHOLD = 6 // m² — below this, use substitutions
 
 function furnishRoom(args: Record<string, unknown>): string {
   const roomType = (args.roomType as string) ?? 'living'
@@ -1493,10 +1655,18 @@ function furnishRoom(args: Record<string, unknown>): string {
 
   const gap = 0.05 // 5cm clearance from wall interior face
 
+  // Small-room substitution: swap large items for smaller alternatives
+  const interiorArea = (width - wallThickness) * (depth - wallThickness)
+  const useSmallSubs = interiorArea < SMALL_ROOM_AREA_THRESHOLD
+
   const placed: unknown[] = []
 
   for (const presetItem of preset) {
-    const catalogEntry = findCatalogItem(presetItem.type)
+    let itemType = presetItem.type
+    if (useSmallSubs && SMALL_ROOM_SUBSTITUTIONS[itemType]) {
+      itemType = SMALL_ROOM_SUBSTITUTIONS[itemType]!
+    }
+    const catalogEntry = findCatalogItem(itemType)
     if (!catalogEntry) continue
 
     // Convert normalized (0-1) offsets to INTERIOR coordinates
@@ -1532,7 +1702,7 @@ function furnishRoom(args: Record<string, unknown>): string {
 
     const result = JSON.parse(
       placeFurniture({
-        type: presetItem.type,
+        type: itemType,
         position: [x, 0, z],
         rotation: presetItem.rotation,
       }),
@@ -1722,6 +1892,22 @@ function createFurnishedApartment(args: Record<string, unknown>): string {
     书房: 'office',
     办公室: 'office',
     office: 'office',
+    玄关: 'entryway',
+    门厅: 'entryway',
+    entryway: 'entryway',
+    阳台: 'balcony',
+    露台: 'balcony',
+    balcony: 'balcony',
+    儿童房: 'kids',
+    kids: 'kids',
+    洗衣房: 'laundry',
+    洗衣间: 'laundry',
+    laundry: 'laundry',
+    健身房: 'gym',
+    gym: 'gym',
+    客房: 'guest',
+    客卧: 'guest',
+    guest: 'guest',
   }
 
   const results: unknown[] = []
