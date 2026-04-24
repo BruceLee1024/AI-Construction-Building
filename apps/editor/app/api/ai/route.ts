@@ -45,6 +45,11 @@ export async function POST(req: Request) {
     baseURL: config.baseURL,
   })
 
+  // DeepSeek V4 models default to thinking mode which requires reasoning_content
+  // passback. Disable it for function-calling agent to avoid 400 errors.
+  const isDeepSeek = resolvedProvider === 'deepseek'
+  const extraParams = isDeepSeek ? { thinking: { type: 'disabled' as const } } : {}
+
   try {
     if (stream) {
       const streamResponse = await client.chat.completions.create({
@@ -54,7 +59,8 @@ export async function POST(req: Request) {
         tool_choice: 'auto',
         temperature: 0.3,
         stream: true,
-      })
+        ...extraParams,
+      } as Parameters<typeof client.chat.completions.create>[0])
 
       const encoder = new TextEncoder()
       const readable = new ReadableStream({
@@ -91,7 +97,8 @@ export async function POST(req: Request) {
       tools,
       tool_choice: 'auto',
       temperature: 0.3,
-    })
+      ...extraParams,
+    } as Parameters<typeof client.chat.completions.create>[0])
 
     return Response.json(response)
   } catch (err: unknown) {

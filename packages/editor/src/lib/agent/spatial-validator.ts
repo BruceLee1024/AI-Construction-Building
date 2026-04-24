@@ -140,12 +140,6 @@ function validateFurnitureBounds(
   if (slabs.length === 0) return
   const { updateNode } = useScene.getState()
 
-  // Use the largest slab as the room boundary
-  const mainSlab = slabs.reduce((best, s) =>
-    s.polygon.length > best.polygon.length ? s : best,
-  )
-  const polygon = mainSlab.polygon
-
   for (const item of items) {
     // Only check floor items (not wall/ceiling attached)
     if (item.asset.attachTo === 'wall' || item.asset.attachTo === 'wall-side' || item.asset.attachTo === 'ceiling') {
@@ -153,8 +147,30 @@ function validateFurnitureBounds(
     }
 
     const [x, _y, z] = item.position
-    if (!pointInPolygon(x, z, polygon)) {
-      // Nudge toward polygon centroid
+
+    // Find the slab this item belongs to (check all slabs, not just the largest)
+    let insideAnySlab = false
+    for (const slab of slabs) {
+      if (pointInPolygon(x, z, slab.polygon)) {
+        insideAnySlab = true
+        break
+      }
+    }
+
+    if (!insideAnySlab) {
+      // Find the nearest slab to nudge the item into
+      let nearestSlab = slabs[0]!
+      let nearestDist = Infinity
+      for (const slab of slabs) {
+        const c = polygonCentroid(slab.polygon)
+        const d = dist2D([x, z], c)
+        if (d < nearestDist) {
+          nearestDist = d
+          nearestSlab = slab
+        }
+      }
+
+      const polygon = nearestSlab.polygon
       const centroid = polygonCentroid(polygon)
       const edgePoint = closestPointOnPolygonEdge(x, z, polygon)
 
