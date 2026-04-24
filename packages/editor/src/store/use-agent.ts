@@ -10,7 +10,7 @@ const SCENE_MODIFYING_TOOLS = new Set([
   'create_ceiling', 'create_zone', 'create_roof', 'create_apartment',
   'create_l_shaped_room', 'create_polygon_room', 'create_hallway',
   'create_building_shell', 'create_furnished_apartment', 'mirror_room',
-  'place_furniture', 'furnish_room', 'move_nodes', 'modify_node',
+  'place_furniture', 'place_in_room', 'place_against_wall', 'furnish_room', 'move_nodes', 'modify_node',
   'batch_modify_nodes', 'add_door_to_wall', 'add_window_to_wall',
   'place_wall_item', 'place_ceiling_item', 'duplicate_level',
 ])
@@ -216,11 +216,35 @@ async function runAgentLoop(
         try {
           const parsed = JSON.parse(validationResult)
           if (parsed.fixedCount > 0 || parsed.warningCount > 0) {
-            // Inject validation report as a system-level context message
+            // Build a diagnostic, educational feedback message
+            const lines: string[] = ['[Spatial Auto-Validation Report]']
+            lines.push(`Auto-fixed: ${parsed.fixedCount} | Warnings: ${parsed.warningCount}`)
+            lines.push('')
+            if (parsed.issues && Array.isArray(parsed.issues)) {
+              for (const issue of parsed.issues as Array<{ severity: string; type: string; message: string; nodeId: string }>) {
+                const icon = issue.severity === 'fixed' ? '🔧' : '⚠️'
+                lines.push(`${icon} [${issue.type}] ${issue.message}`)
+              }
+            }
+            lines.push('')
+            lines.push('Tips to avoid these issues:')
+            if (parsed.issues?.some((i: { type: string }) => i.type === 'bounds')) {
+              lines.push('- Furniture placement: ensure position is inside the room slab polygon. Use interiorBounds from createRoom result.')
+            }
+            if (parsed.issues?.some((i: { type: string }) => i.type === 'snap')) {
+              lines.push('- Wall endpoints: adjacent walls should share exact coordinates. Use the same [x,z] for connected corners.')
+            }
+            if (parsed.issues?.some((i: { type: string }) => i.type === 'gap')) {
+              lines.push('- Wall gaps detected: check that wall endpoints form a closed loop with no small gaps.')
+            }
+            if (parsed.issues?.some((i: { type: string }) => i.type === 'overlap')) {
+              lines.push('- Door/window overflow: ensure door/window width < wall length, centered with position_t=0.5.')
+            }
+
             const validationMsg: ChatMessage = {
               id: genId(),
               role: 'system',
-              content: `[Auto-Validation] ${parsed.fixedCount} issue(s) auto-fixed, ${parsed.warningCount} warning(s). Details: ${validationResult}`,
+              content: lines.join('\n'),
             }
             set((s) => ({
               messages: [...s.messages, validationMsg],

@@ -58,7 +58,9 @@ Choose the **simplest single tool** that accomplishes the task. Do NOT add extra
 | Add window to existing wall (know wall ID) | \`add_window_to_wall\` |
 | Add door during room creation | Set \`addDoor: true\` in create_room |
 | Add ceiling to room | Set \`addCeiling: true\` in create_room |
-| Place furniture | \`place_furniture\` |
+| Place furniture by coordinates | \`place_furniture\` |
+| Place furniture by semantic anchor (north-wall, center…) | \`place_in_room\` ⭐ preferred |
+| Place furniture flush against a specific wall | \`place_against_wall\` ⭐ preferred |
 | Auto-furnish entire room | \`furnish_room\` |
 | Create corridor / hallway | \`create_hallway\` |
 | Complete building (walls+slab+ceiling+roof) | \`create_building_shell\` |
@@ -108,6 +110,50 @@ These tools manage building floors. **Never** use them for single-floor requests
 | Study | 3 × 3 m |
 | Hallway | 1.5 × 4 m |
 | Balcony | 3 × 1.5 m |
+
+## Spatial Context & Feedback
+
+### Reading Tool Returns
+Every room/furniture tool now returns **spatial context** — use it instead of mental math:
+
+- \`create_room\` returns \`spatialContext\`:
+  - \`roomBounds\`: outer corners {minX, minZ, maxX, maxZ}
+  - \`interiorBounds\`: safe furniture zone (wall face + 5cm gap)
+  - \`wallsByFace\`: {south, east, north, west} with wall IDs, endpoints, length
+  - \`slabPolygon\`: actual slab vertices
+
+- \`place_furniture\` / \`place_in_room\` / \`place_against_wall\` return:
+  - \`bbox\`: actual world-space bounding box {minX, minZ, maxX, maxZ}
+  - \`insideSlabId\`: which room slab contains the item (null = outside all rooms!)
+  - \`warning\`: shown if item is NOT inside any room
+
+- \`create_furnished_apartment\` returns:
+  - \`overallBounds\`: total apartment footprint
+  - \`layoutSummary\`: per-room name, origin, size, furniture count
+
+**Always check \`insideSlabId\` and \`warning\` in placement results.** If an item is outside a room, fix it immediately.
+
+### Semantic Placement (preferred over raw coordinates)
+
+When placing individual furniture items, **prefer \`place_in_room\` and \`place_against_wall\`** over \`place_furniture\`:
+
+\`\`\`
+// ❌ Error-prone: manually computing coordinates
+place_furniture({ type: "double-bed", position: [5.75, 0, 3.3], rotation: 0 })
+
+// ✅ Reliable: semantic anchor — system computes exact position
+place_in_room({ type: "double-bed", anchor: "north-wall", orientation: "facing-south", roomOrigin: [4, 0], roomWidth: 3.5, roomDepth: 4 })
+
+// ✅ Wall-relative — system computes perpendicular offset
+place_against_wall({ type: "bookshelf", wallId: "wall_abc", position_t: 0.3, facing: "toward-wall" })
+\`\`\`
+
+### Validation Feedback Loop
+After every scene modification, the system auto-validates and may inject a \`[Spatial Auto-Validation Report]\`. Read it carefully:
+- 🔧 = auto-fixed (wall snaps, furniture nudged inside room)
+- ⚠️ = warning (gaps, overlaps you should address)
+
+Use the tips in the report to avoid repeating the same mistakes.
 
 ## Architectural Design Intelligence
 

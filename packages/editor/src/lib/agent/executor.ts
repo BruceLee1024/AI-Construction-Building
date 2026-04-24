@@ -17,6 +17,11 @@ import type { AnyNode, AnyNodeId } from '@pascal-app/core'
 import { CATALOG_ITEMS } from '../../components/ui/item-catalog/catalog-items'
 import { validateAndCorrectScene, formatValidationReport } from './spatial-validator'
 
+// Round to 3 decimal places for clean spatial feedback
+function round3(v: number): number {
+  return Math.round(v * 1000) / 1000
+}
+
 // Track recently created wall IDs so door/window placement can reference them by index
 let recentWallIds: string[] = []
 
@@ -93,6 +98,10 @@ export function executeToolCall(
         return createPolygonRoom(args)
       case 'place_furniture':
         return placeFurniture(args)
+      case 'place_in_room':
+        return placeInRoom(args)
+      case 'place_against_wall':
+        return placeAgainstWall(args)
       case 'furnish_room':
         return furnishRoom(args)
       case 'create_hallway':
@@ -171,10 +180,41 @@ function createWalls(args: Record<string, unknown>): string {
   useScene.getState().createNodes(ops)
   recentWallIds = createdIds
 
+  // Build per-wall spatial details so AI can reason about geometry
+  const walls = ops.map((op, i) => {
+    const w = op.node as unknown as {
+      id: string
+      start: [number, number]
+      end: [number, number]
+      thickness?: number
+      height?: number
+    }
+    const dx = w.end[0] - w.start[0]
+    const dz = w.end[1] - w.start[1]
+    const length = Math.sqrt(dx * dx + dz * dz)
+    // Determine face direction (which way the wall's outward normal points)
+    let orientation: 'horizontal' | 'vertical' | 'diagonal'
+    if (Math.abs(dz) < 0.01) orientation = 'horizontal'
+    else if (Math.abs(dx) < 0.01) orientation = 'vertical'
+    else orientation = 'diagonal'
+
+    return {
+      id: w.id,
+      index: i,
+      start: w.start,
+      end: w.end,
+      length: Math.round(length * 1000) / 1000,
+      orientation,
+      thickness: w.thickness ?? 0.15,
+      height: w.height ?? 3,
+    }
+  })
+
   return JSON.stringify({
     success: true,
     wallIds: createdIds,
     count: createdIds.length,
+    walls,
   })
 }
 
@@ -323,10 +363,32 @@ function createRoom(args: Record<string, unknown>): string {
   ]
   const slabResult = JSON.parse(createSlab({ polygon: slabPolygon }))
 
+  // Spatial context for the AI
+  const halfT = t // t = wallThickness/2
+  const gap = 0.05
+  const spatialContext = {
+    roomBounds: {
+      minX: round3(x1), minZ: round3(z1),
+      maxX: round3(x2), maxZ: round3(z2),
+    },
+    interiorBounds: {
+      minX: round3(x1 + halfT + gap), minZ: round3(z1 + halfT + gap),
+      maxX: round3(x2 - halfT - gap), maxZ: round3(z2 - halfT - gap),
+    },
+    wallsByFace: {
+      south: { id: wallResult.wallIds?.[0], start: [x1, z1], end: [x2, z1], length: round3(width) },
+      east:  { id: wallResult.wallIds?.[1], start: [x2, z1], end: [x2, z2], length: round3(depth) },
+      north: { id: wallResult.wallIds?.[2], start: [x2, z2], end: [x1, z2], length: round3(width) },
+      west:  { id: wallResult.wallIds?.[3], start: [x1, z2], end: [x1, z1], length: round3(depth) },
+    },
+    slabPolygon,
+  }
+
   const results: Record<string, unknown> = {
     success: true,
     walls: wallResult,
     slab: slabResult,
+    spatialContext,
   }
 
   // Add door
@@ -1118,6 +1180,32 @@ function placeFurniture(args: Record<string, unknown>): string {
 
   useScene.getState().createNode(item, levelId as AnyNodeId)
 
+  // Compute world-space bounding box accounting for rotation
+  const dims = catalogEntry.dimensions ?? [1, 1, 1]
+  const rot = ((rotationDeg % 360) + 360) % 360
+  const isRotated = rot === 90 || rot === 270
+  const worldW = isRotated ? dims[2] : dims[0]
+  const worldD = isRotated ? dims[0] : dims[2]
+  const bbox = {
+    minX: round3(position[0] - worldW / 2),
+    minZ: round3(position[2] - worldD / 2),
+    maxX: round3(position[0] + worldW / 2),
+    maxZ: round3(position[2] + worldD / 2),
+  }
+
+  // Check if item center is inside any slab (= inside a room)
+  let insideRoom: string | null = null
+  const { nodes } = useScene.getState()
+  for (const node of Object.values(nodes)) {
+    if ((node as { type: string }).type === 'slab') {
+      const slab = node as unknown as { id: string; polygon: [number, number][] }
+      if (slab.polygon && pointInPolygonSimple(position[0], position[2], slab.polygon)) {
+        insideRoom = slab.id
+        break
+      }
+    }
+  }
+
   return JSON.stringify({
     success: true,
     itemId: item.id,
@@ -1125,6 +1213,203 @@ function placeFurniture(args: Record<string, unknown>): string {
     catalogId: catalogEntry.id,
     dimensions: catalogEntry.dimensions,
     position,
+    bbox,
+    insideSlabId: insideRoom,
+    warning: insideRoom ? undefined : '⚠️ Item center is NOT inside any room slab!',
+  })
+}
+
+// Simple point-in-polygon (ray casting) for containment checks
+function pointInPolygonSimple(x: number, z: number, polygon: [number, number][]): boolean {
+  let inside = false
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i]![0], zi = polygon[i]![1]
+    const xj = polygon[j]![0], zj = polygon[j]![1]
+    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) {
+      inside = !inside
+    }
+  }
+  return inside
+}
+
+// ── Semantic placement tools (Phase C) ──
+// These tools let the AI place furniture using semantic anchors instead of raw coordinates.
+
+function placeInRoom(args: Record<string, unknown>): string {
+  const itemType = args.type as string
+  const anchor = (args.anchor as string) ?? 'center'
+  const orientation = (args.orientation as string) ?? 'auto'
+  const offsetFromWall = (args.offsetFromWall as number) ?? 0.05
+  const roomOrigin = args.roomOrigin as [number, number] | undefined
+  const roomWidth = args.roomWidth as number | undefined
+  const roomDepth = args.roomDepth as number | undefined
+  const slabId = args.slabId as string | undefined
+  const wallThickness = (args.wallThickness as number) ?? 0.15
+
+  const catalogEntry = itemType ? findCatalogItem(itemType) : null
+  if (!catalogEntry) {
+    const floorItems = getFloorItems()
+    return JSON.stringify({
+      error: `Unknown item "${itemType}". Available: ${floorItems.map((i) => i.id).join(', ')}`,
+    })
+  }
+
+  // Resolve room bounds — either from explicit params or by finding the slab
+  let minX: number, minZ: number, maxX: number, maxZ: number
+  if (roomOrigin && roomWidth && roomDepth) {
+    const halfT = wallThickness / 2
+    minX = roomOrigin[0] + halfT
+    minZ = roomOrigin[1] + halfT
+    maxX = roomOrigin[0] + roomWidth - halfT
+    maxZ = roomOrigin[1] + roomDepth - halfT
+  } else if (slabId) {
+    const slab = useScene.getState().nodes[slabId as AnyNodeId] as unknown as { polygon: [number, number][] } | undefined
+    if (!slab?.polygon) return JSON.stringify({ error: `Slab ${slabId} not found or has no polygon` })
+    minX = Math.min(...slab.polygon.map((p) => p[0]))
+    minZ = Math.min(...slab.polygon.map((p) => p[1]))
+    maxX = Math.max(...slab.polygon.map((p) => p[0]))
+    maxZ = Math.max(...slab.polygon.map((p) => p[1]))
+  } else {
+    return JSON.stringify({
+      error: 'Must provide either (roomOrigin + roomWidth + roomDepth) or slabId to define the room bounds.',
+    })
+  }
+
+  const dims = catalogEntry.dimensions ?? [1, 1, 1]
+  const gap = offsetFromWall
+
+  // Parse anchor → normalized dx, dz
+  // Anchors: center, north-wall, south-wall, east-wall, west-wall,
+  //          northwest-corner, northeast-corner, southwest-corner, southeast-corner
+  let dx = 0.5
+  let dz = 0.5
+  if (anchor.includes('north')) dz = 1.0
+  if (anchor.includes('south')) dz = 0.0
+  if (anchor.includes('east')) dx = 1.0
+  if (anchor.includes('west')) dx = 0.0
+  if (anchor === 'center') { dx = 0.5; dz = 0.5 }
+
+  // Determine rotation from orientation or anchor
+  let rotDeg = 0
+  if (orientation === 'auto') {
+    // Face toward room center from the anchor wall
+    if (anchor.includes('north')) rotDeg = 180
+    else if (anchor.includes('south')) rotDeg = 0
+    else if (anchor.includes('east')) rotDeg = 270
+    else if (anchor.includes('west')) rotDeg = 90
+  } else if (orientation === 'facing-north' || orientation === 'north') {
+    rotDeg = 180
+  } else if (orientation === 'facing-south' || orientation === 'south') {
+    rotDeg = 0
+  } else if (orientation === 'facing-east' || orientation === 'east') {
+    rotDeg = 270
+  } else if (orientation === 'facing-west' || orientation === 'west') {
+    rotDeg = 90
+  } else {
+    rotDeg = Number(orientation) || 0
+  }
+
+  // Account for rotation when computing footprint
+  const rot = ((rotDeg % 360) + 360) % 360
+  const isRotated = rot === 90 || rot === 270
+  const fw = isRotated ? dims[2] : dims[0]
+  const fd = isRotated ? dims[0] : dims[2]
+
+  // Clamp center to safe zone (wall face + half-item + gap)
+  const minCX = minX + fw / 2 + gap
+  const maxCX = maxX - fw / 2 - gap
+  const minCZ = minZ + fd / 2 + gap
+  const maxCZ = maxZ - fd / 2 - gap
+
+  let x: number, z: number
+  if (maxCX <= minCX) x = (minX + maxX) / 2
+  else x = minCX + dx * (maxCX - minCX)
+  if (maxCZ <= minCZ) z = (minZ + maxZ) / 2
+  else z = minCZ + dz * (maxCZ - minCZ)
+
+  // Place via the standard placeFurniture for consistent bbox/containment reporting
+  return placeFurniture({
+    type: itemType,
+    position: [round3(x), 0, round3(z)],
+    rotation: rotDeg,
+  })
+}
+
+function placeAgainstWall(args: Record<string, unknown>): string {
+  const itemType = args.type as string
+  const wallId = args.wallId as string
+  const positionT = (args.position_t as number) ?? 0.5
+  const offsetFromWall = (args.offsetFromWall as number) ?? 0.05
+  const facing = (args.facing as string) ?? 'toward-wall'
+
+  if (!wallId) return JSON.stringify({ error: 'wallId is required' })
+
+  const catalogEntry = itemType ? findCatalogItem(itemType) : null
+  if (!catalogEntry) {
+    const floorItems = getFloorItems()
+    return JSON.stringify({
+      error: `Unknown item "${itemType}". Available: ${floorItems.map((i) => i.id).join(', ')}`,
+    })
+  }
+
+  const wall = useScene.getState().nodes[wallId as AnyNodeId] as unknown as {
+    type: string
+    start: [number, number]
+    end: [number, number]
+    thickness?: number
+  } | undefined
+  if (!wall || wall.type !== 'wall') {
+    return JSON.stringify({ error: `Wall ${wallId} not found or is not a wall` })
+  }
+
+  const wdx = wall.end[0] - wall.start[0]
+  const wdz = wall.end[1] - wall.start[1]
+  const wallLen = Math.sqrt(wdx * wdx + wdz * wdz)
+  if (wallLen < 0.01) return JSON.stringify({ error: 'Wall has zero length' })
+
+  // Wall direction unit vector and normal (pointing "left" of wall direction)
+  const dirX = wdx / wallLen
+  const dirZ = wdz / wallLen
+  const normX = -dirZ // normal points to the left of wall direction
+  const normZ = dirX
+
+  // Position along wall
+  const alongX = wall.start[0] + positionT * wdx
+  const alongZ = wall.start[1] + positionT * wdz
+
+  // Compute wall angle for furniture rotation
+  const wallAngleDeg = (Math.atan2(-wdx, -wdz) * 180) / Math.PI // angle wall faces (normal direction)
+
+  const dims = catalogEntry.dimensions ?? [1, 1, 1]
+  const halfT = (wall.thickness ?? 0.15) / 2
+
+  // Offset from wall: push item away from wall interior face by half its depth + gap
+  let rotDeg: number
+  let perpDist: number
+  if (facing === 'toward-wall' || facing === 'facing-wall') {
+    // Item faces the wall (e.g., desk against wall, person facing wall)
+    rotDeg = ((wallAngleDeg + 180) % 360 + 360) % 360
+    const rot = ((rotDeg % 360) + 360) % 360
+    const isRot = rot === 90 || rot === 270
+    const fd = isRot ? dims[0] : dims[2]
+    perpDist = halfT + fd / 2 + offsetFromWall
+  } else {
+    // Item faces away from wall (e.g., bookshelf flush against wall)
+    rotDeg = ((wallAngleDeg) % 360 + 360) % 360
+    const rot = ((rotDeg % 360) + 360) % 360
+    const isRot = rot === 90 || rot === 270
+    const fd = isRot ? dims[0] : dims[2]
+    perpDist = halfT + fd / 2 + offsetFromWall
+  }
+
+  // Final position: along wall + offset perpendicular
+  const x = round3(alongX + normX * perpDist)
+  const z = round3(alongZ + normZ * perpDist)
+
+  return placeFurniture({
+    type: itemType,
+    position: [x, 0, z],
+    rotation: Math.round(rotDeg),
   })
 }
 
@@ -1255,11 +1540,25 @@ function furnishRoom(args: Record<string, unknown>): string {
     placed.push(result)
   }
 
+  // Build spatial context for the furnished room
+  const halfT = wallThickness / 2
+  const roomSpatial = {
+    roomBounds: {
+      minX: round3(origin[0]), minZ: round3(origin[1]),
+      maxX: round3(origin[0] + width), maxZ: round3(origin[1] + depth),
+    },
+    interiorBounds: {
+      minX: round3(origin[0] + halfT + gap), minZ: round3(origin[1] + halfT + gap),
+      maxX: round3(origin[0] + width - halfT - gap), maxZ: round3(origin[1] + depth - halfT - gap),
+    },
+  }
+
   return JSON.stringify({
     success: true,
     roomType,
     itemsPlaced: placed.length,
     items: placed,
+    roomSpatial,
   })
 }
 
@@ -1490,6 +1789,8 @@ function createFurnishedApartment(args: Record<string, unknown>): string {
 
     results.push({
       room: room.name,
+      origin: [round3(curX), round3(curZ)],
+      size: { width: room.width, depth: room.depth },
       ...roomResult,
       zone: zoneResult,
       furniture: furnitureResult,
@@ -1499,9 +1800,27 @@ function createFurnishedApartment(args: Record<string, unknown>): string {
     rowMaxDepth = Math.max(rowMaxDepth, room.depth)
   }
 
+  // Build overall spatial layout summary for the AI
+  type RoomEntry = { room: string; origin: [number, number]; size: { width: number; depth: number }; furniture: { itemsPlaced?: number } | null }
+  const typedResults = results as unknown as RoomEntry[]
+  const layoutSummary = typedResults.map((r) => ({
+    name: r.room,
+    origin: r.origin,
+    size: r.size,
+    furnitureCount: r.furniture?.itemsPlaced ?? 0,
+  }))
+  const overallBounds = {
+    minX: round3(Math.min(...typedResults.map((r) => r.origin[0]))),
+    minZ: round3(Math.min(...typedResults.map((r) => r.origin[1]))),
+    maxX: round3(Math.max(...typedResults.map((r) => r.origin[0] + r.size.width))),
+    maxZ: round3(Math.max(...typedResults.map((r) => r.origin[1] + r.size.depth))),
+  }
+
   return JSON.stringify({
     success: true,
     roomCount: rooms.length,
+    overallBounds,
+    layoutSummary,
     rooms: results,
   })
 }

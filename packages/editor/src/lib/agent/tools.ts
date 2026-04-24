@@ -727,6 +727,100 @@ export const agentTools: ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
+      name: 'place_in_room',
+      description:
+        'Place a furniture item in a room using a semantic anchor (e.g., "north-wall", "center", "southeast-corner") instead of raw coordinates. The system auto-computes the correct world position, clamping to wall interior faces. Requires room bounds (via roomOrigin+roomWidth+roomDepth or slabId). Returns bbox and containment info.',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            description: 'Catalog item ID (e.g., "sofa", "double-bed", "office-table")',
+          },
+          anchor: {
+            type: 'string',
+            enum: [
+              'center',
+              'north-wall', 'south-wall', 'east-wall', 'west-wall',
+              'northwest-corner', 'northeast-corner', 'southwest-corner', 'southeast-corner',
+            ],
+            description: 'Semantic position within the room (default: "center")',
+          },
+          orientation: {
+            type: 'string',
+            description:
+              'Facing direction: "auto" (faces room center from anchor), "facing-north", "facing-south", "facing-east", "facing-west", or a number in degrees. Default: "auto".',
+          },
+          roomOrigin: {
+            type: 'array',
+            items: { type: 'number' },
+            minItems: 2,
+            maxItems: 2,
+            description: 'Room bottom-left corner [x, z]. Use spatialContext.roomBounds from create_room result.',
+          },
+          roomWidth: {
+            type: 'number',
+            description: 'Room width (X) in meters',
+          },
+          roomDepth: {
+            type: 'number',
+            description: 'Room depth (Z) in meters',
+          },
+          slabId: {
+            type: 'string',
+            description: 'Alternative: provide slab ID instead of roomOrigin/width/depth. Room bounds will be derived from the slab polygon.',
+          },
+          wallThickness: {
+            type: 'number',
+            description: 'Wall thickness in meters (default: 0.15). Used to compute interior bounds.',
+          },
+          offsetFromWall: {
+            type: 'number',
+            description: 'Gap between item and wall face in meters (default: 0.05)',
+          },
+        },
+        required: ['type'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'place_against_wall',
+      description:
+        'Place a furniture item against a specific wall, at a position along the wall (0-1). Automatically computes the correct perpendicular offset so the item sits flush against the wall interior face. Ideal for bookshelves, desks, kitchen counters, etc.',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            description: 'Catalog item ID (e.g., "bookshelf", "kitchen-counter", "tv-stand")',
+          },
+          wallId: {
+            type: 'string',
+            description: 'ID of the wall to place against. Get from create_room spatialContext.wallsByFace or get_scene_info.',
+          },
+          position_t: {
+            type: 'number',
+            description: 'Position along wall from 0 (start) to 1 (end). 0.5 = center. Default: 0.5.',
+          },
+          facing: {
+            type: 'string',
+            enum: ['toward-wall', 'away-from-wall'],
+            description: 'Item faces toward the wall (back flush) or away from wall (front flush). Default: "toward-wall".',
+          },
+          offsetFromWall: {
+            type: 'number',
+            description: 'Gap between item and wall face in meters (default: 0.05)',
+          },
+        },
+        required: ['type', 'wallId'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
       name: 'furnish_room',
       description:
         'Automatically furnish a room with appropriate furniture based on room type. Places furniture items using built-in layout presets. Supported room types: bedroom, living, kitchen, bathroom, dining, office.',
