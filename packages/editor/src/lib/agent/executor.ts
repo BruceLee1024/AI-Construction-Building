@@ -1206,13 +1206,7 @@ function furnishRoom(args: Record<string, unknown>): string {
     })
   }
 
-  // Compute interior bounds (inset from outer walls by wall thickness + gap)
   const gap = 0.05 // 5cm clearance from wall interior face
-  const inset = wallThickness + gap
-  const interiorW = Math.max(0.5, width - inset * 2)
-  const interiorD = Math.max(0.5, depth - inset * 2)
-  const interiorOx = origin[0] + inset
-  const interiorOz = origin[1] + inset
 
   const placed: unknown[] = []
 
@@ -1222,16 +1216,34 @@ function furnishRoom(args: Record<string, unknown>): string {
 
     // Convert normalized (0-1) offsets to INTERIOR coordinates
     const dims = catalogEntry.dimensions ?? [1, 1, 1]
-    const fw = dims[0] // furniture width (X)
-    const fd = dims[2] // furniture depth (Z)
+    // Account for rotation: 90°/270° swaps width and depth in world space
+    const rot = ((presetItem.rotation % 360) + 360) % 360
+    const isRotated = rot === 90 || rot === 270
+    const fw = isRotated ? dims[2] : dims[0] // furniture width (X) in world space
+    const fd = isRotated ? dims[0] : dims[2] // furniture depth (Z) in world space
 
-    // dx=0 → furniture flush against west interior wall
-    // dx=1 → furniture flush against east interior wall
-    // dx=0.5 → centered
-    const availX = Math.max(0, interiorW - fw)
-    const availZ = Math.max(0, interiorD - fd)
-    const x = interiorOx + presetItem.dx * availX + fw / 2
-    const z = interiorOz + presetItem.dz * availZ + fd / 2
+    // Clamp furniture center so it never extends past wall interior faces.
+    // Wall interior face = origin + wallThickness/2 (inward from centerline).
+    const halfT = wallThickness / 2
+    const minCenterX = origin[0] + halfT + fw / 2 + gap
+    const maxCenterX = origin[0] + width - halfT - fw / 2 - gap
+    const minCenterZ = origin[1] + halfT + fd / 2 + gap
+    const maxCenterZ = origin[1] + depth - halfT - fd / 2 - gap
+
+    let x: number
+    let z: number
+    if (maxCenterX <= minCenterX) {
+      // Furniture too wide — center it in the room
+      x = origin[0] + width / 2
+    } else {
+      x = minCenterX + presetItem.dx * (maxCenterX - minCenterX)
+    }
+    if (maxCenterZ <= minCenterZ) {
+      // Furniture too deep — center it in the room
+      z = origin[1] + depth / 2
+    } else {
+      z = minCenterZ + presetItem.dz * (maxCenterZ - minCenterZ)
+    }
 
     const result = JSON.parse(
       placeFurniture({
