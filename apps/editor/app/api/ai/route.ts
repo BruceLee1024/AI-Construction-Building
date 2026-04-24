@@ -7,7 +7,7 @@ const PROVIDER_CONFIG: Record<string, { baseURL: string; defaultModel: string }>
   },
   deepseek: {
     baseURL: 'https://api.deepseek.com',
-    defaultModel: 'deepseek-chat',
+    defaultModel: 'deepseek-v4-pro',
   },
 }
 

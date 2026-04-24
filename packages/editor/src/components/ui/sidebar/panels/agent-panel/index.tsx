@@ -482,7 +482,7 @@ function SettingsPanel() {
         <input
           className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary"
           onChange={(e) => setSettings({ model: e.target.value })}
-          placeholder={settings.provider === 'deepseek' ? 'deepseek-chat' : 'gpt-4o'}
+          placeholder={settings.provider === 'deepseek' ? 'deepseek-v4-pro' : 'gpt-4o'}
           type="text"
           value={settings.model}
           {...stopEditorCapture}
