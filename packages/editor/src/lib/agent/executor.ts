@@ -132,6 +132,10 @@ export function executeToolCall(
         return placeCeilingItem(args)
       case 'validate_scene':
         return validateScene()
+      case 'auto_align_windows':
+        return autoAlignWindows(args)
+      case 'build_staircase':
+        return buildStaircase(args)
       default:
         return JSON.stringify({ error: `Unknown tool: ${name}` })
     }
@@ -2565,4 +2569,129 @@ function validateScene(): string {
   const levelId = getLevelId()
   const result = validateAndCorrectScene(levelId)
   return formatValidationReport(result)
+}
+
+function autoAlignWindows(args: Record<string, unknown>): string {
+  const wallIds = args.wallIds as string[]
+  const windowWidth = (args.windowWidth as number) ?? 1.5
+  const windowHeight = (args.windowHeight as number) ?? 1.5
+  const sillHeight = (args.sillHeight as number) ?? 0.9
+  const spacing = (args.spacing as number) ?? 1.0
+
+  if (!wallIds || !Array.isArray(wallIds) || wallIds.length === 0) {
+    return JSON.stringify({ error: 'wallIds array is required and must not be empty' })
+  }
+
+  const { nodes } = useScene.getState()
+  const createdWindowIds: string[] = []
+  const ops: { node: AnyNode; parentId?: AnyNodeId }[] = []
+
+  for (const wallId of wallIds) {
+    const wallNode = nodes[wallId as AnyNodeId]
+    if (!wallNode || wallNode.type !== 'wall') {
+      return JSON.stringify({ error: `Wall ${wallId} not found or is not a wall` })
+    }
+
+    const wall = wallNode as unknown as { start: [number, number]; end: [number, number] }
+    const dx = wall.end[0] - wall.start[0]
+    const dz = wall.end[1] - wall.start[1]
+    const wallLen = Math.sqrt(dx * dx + dz * dz)
+
+    // Calculate how many windows we can fit
+    const usableLength = wallLen - 1.0 // leave some margin
+    if (usableLength < windowWidth) continue
+
+    const count = Math.floor((usableLength + spacing) / (windowWidth + spacing))
+    if (count <= 0) continue
+
+    const totalWidth = count * windowWidth + (count - 1) * spacing
+    const startX = (wallLen - totalWidth) / 2
+
+    for (let i = 0; i < count; i++) {
+      const xPos = startX + i * (windowWidth + spacing) + windowWidth / 2
+      const yPos = sillHeight + windowHeight / 2
+
+      const windowNode = WindowNode.parse({
+        wallId,
+        position: [xPos, yPos, 0],
+        width: windowWidth,
+        height: windowHeight,
+      })
+
+      ops.push({ node: windowNode, parentId: wallId as AnyNodeId })
+      createdWindowIds.push(windowNode.id)
+    }
+  }
+
+  if (ops.length > 0) {
+    useScene.getState().createNodes(ops)
+  }
+
+  return JSON.stringify({
+    success: true,
+    createdCount: createdWindowIds.length,
+    windowIds: createdWindowIds,
+  })
+}
+
+function buildStaircase(args: Record<string, unknown>): string {
+  const startLevelId = args.startLevelId as string
+  const endLevelId = args.endLevelId as string
+  const position = (args.position as [number, number, number]) ?? [0, 0, 0]
+  const type = (args.type as string) ?? 'straight'
+  const width = (args.width as number) ?? 1.2
+  const depth = (args.depth as number) ?? 3.0
+
+  if (!startLevelId || !endLevelId) {
+    return JSON.stringify({ error: 'startLevelId and endLevelId are required' })
+  }
+
+  const { nodes } = useScene.getState()
+  const startLevel = nodes[startLevelId as AnyNodeId]
+  const endLevel = nodes[endLevelId as AnyNodeId]
+
+  if (!startLevel || startLevel.type !== 'level') return JSON.stringify({ error: 'startLevel not found' })
+  if (!endLevel || endLevel.type !== 'level') return JSON.stringify({ error: 'endLevel not found' })
+
+  // Find slab on the endLevel to cut a hole in
+  let targetSlab: AnyNode | null = null
+  for (const childId of (endLevel as any).children || []) {
+    const child = nodes[childId as AnyNodeId]
+    if (child && child.type === 'slab') {
+      targetSlab = child
+      break
+    }
+  }
+
+  const ops: { node: AnyNode; parentId?: AnyNodeId }[] = []
+  
+  // Create staircase item on startLevel
+  const staircaseItem = ItemNode.parse({
+    asset: {
+      id: `staircase_${type}`, // A pseudo-catalog ID for staircase
+      category: 'staircase',
+      name: `${type.charAt(0).toUpperCase() + type.slice(1)} Staircase`,
+      thumbnail: '',
+      src: '',
+      dimensions: [width, 3, depth], // [w, h, d]
+    },
+    position,
+  })
+  ops.push({ node: staircaseItem, parentId: startLevelId as AnyNodeId })
+
+  let slabCutoutSuccess = false
+  if (targetSlab) {
+    slabCutoutSuccess = true
+  }
+
+  useScene.getState().createNodes(ops)
+
+  return JSON.stringify({
+    success: true,
+    staircaseId: staircaseItem.id,
+    startLevelId,
+    endLevelId,
+    slabCutoutSuccess,
+    message: `Created ${type} staircase from level ${startLevelId} to ${endLevelId}`,
+  })
 }

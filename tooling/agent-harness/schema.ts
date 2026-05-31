@@ -1,0 +1,161 @@
+import type { AnyNode } from '@pascal-app/core'
+
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue }
+
+export interface HarnessStep {
+  tool: string
+  args?: Record<string, JsonValue>
+}
+
+export type ToolResultSuccessAssertion = {
+  type: 'toolResult.success'
+  step: number
+  expected?: boolean
+}
+
+export type NodeCountAssertion = {
+  type: 'node.count'
+  nodeType: string
+  exact?: number
+  min?: number
+  max?: number
+}
+
+export type NodeExistsAssertion = {
+  type: 'node.exists'
+  nodeType: string
+  where?: Record<string, JsonValue | FieldMatch>
+}
+
+export type ClosedWallsAssertion = {
+  type: 'geometry.closedWalls'
+  nodeType?: 'wall'
+  tolerance?: number
+}
+
+export type ValidationAssertion = {
+  type: 'validation'
+  valid?: boolean
+  blocking?: boolean
+  fixedCount?: CountExpectation
+  warningCount?: CountExpectation
+}
+
+export type CountExpectation =
+  | number
+  | {
+      exact?: number
+      min?: number
+      max?: number
+    }
+
+export type FieldMatch = {
+  equals?: JsonValue
+  approx?: number
+  tolerance?: number
+  exists?: boolean
+  notNull?: boolean
+}
+
+export type HarnessAssertion =
+  | ToolResultSuccessAssertion
+  | NodeCountAssertion
+  | NodeExistsAssertion
+  | ClosedWallsAssertion
+  | ValidationAssertion
+
+export interface HarnessCase {
+  name: string
+  description?: string
+  steps: HarnessStep[]
+  assertions: HarnessAssertion[]
+}
+
+export interface AssertionResult {
+  pass: boolean
+  type: string
+  message: string
+}
+
+export interface StepResult {
+  index: number
+  tool: string
+  args: Record<string, JsonValue>
+  raw: string
+  parsed: unknown
+}
+
+export interface CaseResult {
+  name: string
+  description?: string
+  pass: boolean
+  durationMs: number
+  steps: StepResult[]
+  validation: unknown
+  assertions: AssertionResult[]
+  error?: string
+}
+
+export interface HarnessReport {
+  generatedAt: string
+  totals: {
+    cases: number
+    passed: number
+    failed: number
+    assertions: number
+  }
+  cases: CaseResult[]
+}
+
+export function assertHarnessCase(value: unknown, filePath: string): asserts value is HarnessCase {
+  if (!isRecord(value)) throw new Error(`${filePath}: case must be an object`)
+  if (typeof value.name !== 'string' || value.name.trim() === '') {
+    throw new Error(`${filePath}: name must be a non-empty string`)
+  }
+  if (!Array.isArray(value.steps) || value.steps.length === 0) {
+    throw new Error(`${filePath}: steps must be a non-empty array`)
+  }
+  if (!Array.isArray(value.assertions) || value.assertions.length === 0) {
+    throw new Error(`${filePath}: assertions must be a non-empty array`)
+  }
+
+  value.steps.forEach((step, index) => {
+    if (!isRecord(step)) throw new Error(`${filePath}: steps[${index}] must be an object`)
+    if (typeof step.tool !== 'string' || step.tool.trim() === '') {
+      throw new Error(`${filePath}: steps[${index}].tool must be a non-empty string`)
+    }
+    if (step.args != null && !isRecord(step.args)) {
+      throw new Error(`${filePath}: steps[${index}].args must be an object when provided`)
+    }
+  })
+
+  value.assertions.forEach((assertion, index) => {
+    if (!isRecord(assertion)) {
+      throw new Error(`${filePath}: assertions[${index}] must be an object`)
+    }
+    if (typeof assertion.type !== 'string') {
+      throw new Error(`${filePath}: assertions[${index}].type must be a string`)
+    }
+  })
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function getByPath(source: unknown, path: string): unknown {
+  return path.split('.').reduce<unknown>((current, part) => {
+    if (!isRecord(current)) return undefined
+    return current[part]
+  }, source)
+}
+
+export function nodesByType(nodes: Record<string, AnyNode>, type: string): AnyNode[] {
+  return Object.values(nodes).filter((node) => node.type === type)
+}

@@ -1,13 +1,13 @@
 import { useScene } from '@pascal-app/core'
 import type { AnyNode, AnyNodeId, WallNode, SlabNode, DoorNode, WindowNode, ItemNode } from '@pascal-app/core'
-import { pointInPolygon } from '@pascal-app/core'
+import { pointInPolygon, getScaledDimensions } from '@pascal-app/core'
 
 // ============================================================================
 // TYPES
 // ============================================================================
 
 interface ValidationIssue {
-  type: 'snap' | 'bounds' | 'overlap' | 'gap' | 'info'
+  type: 'snap' | 'bounds' | 'overlap' | 'gap' | 'info' | 'code'
   severity: 'fixed' | 'warning' | 'info'
   nodeId: string
   message: string
@@ -17,6 +17,7 @@ interface ValidationResult {
   issues: ValidationIssue[]
   fixedCount: number
   warningCount: number
+  blockingCount: number
 }
 
 // ============================================================================
@@ -26,6 +27,11 @@ interface ValidationResult {
 const SNAP_THRESHOLD = 0.05 // 5cm — snap wall endpoints closer than this
 const FURNITURE_MARGIN = 0.1 // 10cm — minimum distance from wall for furniture
 const DOOR_MARGIN = 0.05 // 5cm — minimum margin from wall edge for doors/windows
+const MIN_DOOR_CLEAR_WIDTH = 0.8 // 80cm — conservative clear opening for rooms
+const MIN_CORRIDOR_WIDTH = 1.1 // 1.1m — common residential/egress corridor target
+const MIN_ROOM_WIDTH = 1.8 // avoid unusably narrow generated rooms
+const MAX_ROOM_ASPECT_RATIO = 3 // avoid 1x5m style rooms unless explicitly modeled as corridors
+const MIN_DAYLIGHT_RATIO = 0.08 // window area / floor area heuristic
 
 // ============================================================================
 // HELPERS
@@ -317,6 +323,625 @@ function detectWallGaps(
   }
 }
 
+function polygonArea(poly: [number, number][]): number {
+  let area = 0
+  const n = poly.length
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n
+    area += poly[i]![0] * poly[j]![1] - poly[j]![0] * poly[i]![1]
+  }
+  return Math.abs(area / 2)
+}
+
+function polygonBounds(poly: [number, number][]): {
+  minX: number
+  minZ: number
+  maxX: number
+  maxZ: number
+  width: number
+  depth: number
+} {
+  const xs = poly.map((p) => p[0])
+  const zs = poly.map((p) => p[1])
+  const minX = Math.min(...xs)
+  const minZ = Math.min(...zs)
+  const maxX = Math.max(...xs)
+  const maxZ = Math.max(...zs)
+  return {
+    minX,
+    minZ,
+    maxX,
+    maxZ,
+    width: maxX - minX,
+    depth: maxZ - minZ,
+  }
+}
+
+function pointToSegmentDistance(
+  point: [number, number],
+  start: [number, number],
+  end: [number, number],
+): number {
+  const dx = end[0] - start[0]
+  const dz = end[1] - start[1]
+  const lenSq = dx * dx + dz * dz
+  if (lenSq < 1e-10) return dist2D(point, start)
+
+  const t = Math.max(
+    0,
+    Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dz) / lenSq),
+  )
+  return dist2D(point, [start[0] + t * dx, start[1] + t * dz])
+}
+
+function slabTouchesExterior(slab: SlabNode, walls: WallNode[]): boolean {
+  if (slab.polygon.length < 3) return false
+
+  for (const point of slab.polygon) {
+    for (const wall of walls) {
+      if (pointToSegmentDistance(point, wall.start, wall.end) <= 0.2) {
+        return true
+      }
+    }
+  }
+
+  return false
+}
+
+function wallOpeningWorldPoint(
+  wall: WallNode,
+  localX: number,
+): [number, number] | null {
+  const dx = wall.end[0] - wall.start[0]
+  const dz = wall.end[1] - wall.start[1]
+  const len = Math.sqrt(dx * dx + dz * dz)
+  if (len < 0.001) return null
+
+  return [
+    wall.start[0] + (dx / len) * localX,
+    wall.start[1] + (dz / len) * localX,
+  ]
+}
+
+function openingServesSlab(
+  point: [number, number],
+  wall: WallNode,
+  slab: SlabNode,
+): boolean {
+  const dx = wall.end[0] - wall.start[0]
+  const dz = wall.end[1] - wall.start[1]
+  const len = Math.sqrt(dx * dx + dz * dz)
+  if (len < 0.001) return false
+
+  const normX = -dz / len
+  const normZ = dx / len
+  const probeDistance = (wall.thickness ?? 0.15) / 2 + 0.2
+  const p1: [number, number] = [
+    point[0] + normX * probeDistance,
+    point[1] + normZ * probeDistance,
+  ]
+  const p2: [number, number] = [
+    point[0] - normX * probeDistance,
+    point[1] - normZ * probeDistance,
+  ]
+
+  return pointInPolygon(p1[0], p1[1], slab.polygon) || pointInPolygon(p2[0], p2[1], slab.polygon)
+}
+
+function collectWindowsBySlab(
+  slabs: SlabNode[],
+  walls: WallNode[],
+  nodes: Record<AnyNodeId, AnyNode>,
+): Map<string, WindowNode[]> {
+  const result = new Map<string, WindowNode[]>()
+  for (const slab of slabs) result.set(slab.id, [])
+
+  for (const wall of walls) {
+    for (const childId of wall.children) {
+      const child = nodes[childId as AnyNodeId]
+      if (child?.type !== 'window') continue
+
+      const win = child as WindowNode
+      const point = wallOpeningWorldPoint(wall, win.position[0])
+      if (!point) continue
+
+      for (const slab of slabs) {
+        if (openingServesSlab(point, wall, slab)) {
+          result.get(slab.id)?.push(win)
+        }
+      }
+    }
+  }
+
+  return result
+}
+
+function collectDoorsBySlab(
+  slabs: SlabNode[],
+  walls: WallNode[],
+  nodes: Record<AnyNodeId, AnyNode>,
+): Map<string, DoorNode[]> {
+  const result = new Map<string, DoorNode[]>()
+  for (const slab of slabs) result.set(slab.id, [])
+
+  for (const wall of walls) {
+    for (const childId of wall.children) {
+      const child = nodes[childId as AnyNodeId]
+      if (child?.type !== 'door') continue
+
+      const door = child as DoorNode
+      const point = wallOpeningWorldPoint(wall, door.position[0])
+      if (!point) continue
+
+      for (const slab of slabs) {
+        if (openingServesSlab(point, wall, slab)) {
+          result.get(slab.id)?.push(door)
+        }
+      }
+    }
+  }
+
+  return result
+}
+
+function detectDoorWindowOverlap(
+  walls: WallNode[],
+  nodes: Record<AnyNodeId, AnyNode>,
+  issues: ValidationIssue[],
+): void {
+  for (const wall of walls) {
+    const openings: { id: string; minX: number; maxX: number }[] = []
+    
+    for (const childId of wall.children) {
+      const child = nodes[childId as AnyNodeId]
+      if (!child) continue
+      
+      let width = 0
+      let localX = 0
+      if (child.type === 'door') {
+        width = (child as DoorNode).width ?? 0.9
+        localX = (child as DoorNode).position[0]
+      } else if (child.type === 'window') {
+        width = (child as WindowNode).width ?? 1.5
+        localX = (child as WindowNode).position[0]
+      } else {
+        continue
+      }
+      
+      openings.push({
+        id: child.id,
+        minX: localX - width / 2,
+        maxX: localX + width / 2
+      })
+    }
+    
+    for (let i = 0; i < openings.length; i++) {
+      for (let j = i + 1; j < openings.length; j++) {
+        const a = openings[i]!
+        const b = openings[j]!
+        if (a.maxX > b.minX && a.minX < b.maxX) {
+          issues.push({
+            type: 'overlap',
+            severity: 'warning',
+            nodeId: a.id,
+            message: `Opening overlaps with another opening on the same wall`,
+          })
+        }
+      }
+    }
+  }
+}
+
+function validateFurnitureCollision(
+  items: ItemNode[],
+  issues: ValidationIssue[],
+): void {
+  const floorItems = items.filter(i => i.asset.attachTo !== 'wall' && i.asset.attachTo !== 'wall-side' && i.asset.attachTo !== 'ceiling')
+  
+  for (let i = 0; i < floorItems.length; i++) {
+    for (let j = i + 1; j < floorItems.length; j++) {
+      const a = floorItems[i]!
+      const b = floorItems[j]!
+      
+      const dist = dist2D([a.position[0], a.position[2]], [b.position[0], b.position[2]])
+      
+      const dimA = getScaledDimensions(a)
+      const dimB = getScaledDimensions(b)
+      const radiusA = Math.max(dimA[0], dimA[2]) / 2
+      const radiusB = Math.max(dimB[0], dimB[2]) / 2
+      
+      // Allow 20% overlap margin to prevent false positives for items placed close to each other
+      if (dist < (radiusA + radiusB) * 0.8) {
+        issues.push({
+          type: 'overlap',
+          severity: 'warning',
+          nodeId: a.id,
+          message: `Furniture "${a.asset.name}" might be colliding with "${b.asset.name}"`,
+        })
+      }
+    }
+  }
+}
+
+function validatePhysicsAndStructure(
+  items: ItemNode[],
+  slabs: SlabNode[],
+  walls: WallNode[],
+  nodes: Record<AnyNodeId, AnyNode>,
+  issues: ValidationIssue[],
+): void {
+  const { updateNode } = useScene.getState()
+  
+  // 1. Furniture floating check
+  for (const item of items) {
+    if (item.asset.attachTo === 'wall' || item.asset.attachTo === 'wall-side' || item.asset.attachTo === 'ceiling') continue
+    
+    // Find highest slab it rests on
+    let highestElevation = 0
+    for (const slab of slabs) {
+      if (slab.polygon.length >= 3 && pointInPolygon(item.position[0], item.position[2], slab.polygon)) {
+        highestElevation = Math.max(highestElevation, slab.elevation ?? 0.05)
+      }
+    }
+    
+    if (Math.abs(item.position[1] - highestElevation) > 0.02) {
+      updateNode(item.id as AnyNodeId, {
+        position: [item.position[0], highestElevation, item.position[2]],
+      } as Partial<AnyNode>)
+      
+      issues.push({
+        type: 'bounds',
+        severity: 'fixed',
+        nodeId: item.id,
+        message: `Furniture "${item.asset.name}" was floating, snapped to floor level (${highestElevation.toFixed(2)}m)`,
+      })
+    }
+  }
+  
+  // 2. Door/Window height check
+  for (const wall of walls) {
+    const wallHeight = wall.height ?? 2.8
+    for (const childId of wall.children) {
+      const child = nodes[childId as AnyNodeId]
+      if (!child) continue
+      
+      if (child.type === 'door') {
+        const door = child as DoorNode
+        if ((door.height ?? 2.1) > wallHeight) {
+          updateNode(door.id as AnyNodeId, { height: wallHeight - 0.1 } as Partial<AnyNode>)
+          issues.push({
+            type: 'bounds',
+            severity: 'fixed',
+            nodeId: door.id,
+            message: `Door height exceeded wall height, scaled down`,
+          })
+        }
+      } else if (child.type === 'window') {
+        const win = child as WindowNode
+        const topEdge = (win.position[1] ?? 0.9) + (win.height ?? 1.5) / 2
+        if (topEdge > wallHeight) {
+          issues.push({
+            type: 'bounds',
+            severity: 'warning',
+            nodeId: win.id,
+            message: `Window top edge (${topEdge.toFixed(2)}m) exceeds wall height (${wallHeight.toFixed(2)}m)`,
+          })
+        }
+      }
+    }
+  }
+  
+  // 3. Large span check
+  for (const slab of slabs) {
+    if (slab.polygon.length < 3) continue
+    const area = polygonArea(slab.polygon)
+    // If a single room area is > 64 sqm (e.g. 8x8), warn about structure
+    if (area > 64) {
+      issues.push({
+        type: 'info',
+        severity: 'info',
+        nodeId: slab.id,
+        message: `Large slab detected (${area.toFixed(1)} sqm). Ensure adequate structural support.`,
+      })
+    }
+  }
+}
+
+function validateArchitectureDesign(
+  items: ItemNode[],
+  slabs: SlabNode[],
+  walls: WallNode[],
+  nodes: Record<AnyNodeId, AnyNode>,
+  issues: ValidationIssue[],
+): void {
+  const windowsBySlab = collectWindowsBySlab(slabs, walls, nodes)
+
+  for (const slab of slabs) {
+    if (slab.polygon.length < 3) continue
+
+    const bounds = polygonBounds(slab.polygon)
+    const area = polygonArea(slab.polygon)
+    const windows = windowsBySlab.get(slab.id) ?? []
+    const windowArea = windows.reduce((sum, win) => sum + (win.width ?? 1.5) * (win.height ?? 1.5), 0)
+    const daylightRatio = area > 0 ? windowArea / area : 0
+    const shortSide = Math.min(bounds.width, bounds.depth)
+    const longSide = Math.max(bounds.width, bounds.depth)
+    const aspectRatio = shortSide > 0 ? longSide / shortSide : Infinity
+    const isLikelyCorridor = longSide >= 3 && shortSide <= 1.6
+
+    if (area >= 8 && windows.length === 0) {
+      issues.push({
+        type: 'code',
+        severity: 'warning',
+        nodeId: slab.id,
+        message: `Room/slab ${slab.id} has no associated exterior window. Add daylight/ventilation before furnishing.`,
+      })
+    } else if (area >= 8 && daylightRatio < MIN_DAYLIGHT_RATIO) {
+      issues.push({
+        type: 'code',
+        severity: 'warning',
+        nodeId: slab.id,
+        message: `Room/slab ${slab.id} daylight ratio is low (${(daylightRatio * 100).toFixed(1)}%). Add or enlarge windows.`,
+      })
+    }
+
+    if (!isLikelyCorridor && area >= 4 && shortSide < MIN_ROOM_WIDTH) {
+      issues.push({
+        type: 'code',
+        severity: 'warning',
+        nodeId: slab.id,
+        message: `Usable room is too narrow (${shortSide.toFixed(2)}m). Keep normal rooms at least ${MIN_ROOM_WIDTH.toFixed(1)}m wide; use hallway semantics for narrower spaces.`,
+      })
+    }
+
+    if (area >= 6 && aspectRatio > MAX_ROOM_ASPECT_RATIO && shortSide < MIN_CORRIDOR_WIDTH) {
+      issues.push({
+        type: 'code',
+        severity: 'warning',
+        nodeId: slab.id,
+        message: `Room proportion is extreme (${aspectRatio.toFixed(1)}:1). Rebalance dimensions or model it as a corridor.`,
+      })
+    }
+    if (area >= 8 && !slabTouchesExterior(slab, walls)) {
+      issues.push({
+        type: 'code',
+        severity: 'warning',
+        nodeId: slab.id,
+        message: `Enclosed room appears to have no exterior edge for natural light/ventilation.`,
+      })
+    }
+  }
+}
+
+function checkCirculationAndSafety(
+  levelId: string,
+  walls: WallNode[],
+  slabs: SlabNode[],
+  items: ItemNode[],
+  nodes: Record<AnyNodeId, AnyNode>,
+  issues: ValidationIssue[],
+): void {
+  const levelNode = nodes[levelId as AnyNodeId]
+  const isGroundLevel = levelNode && levelNode.type === 'level' && (levelNode as any).level === 0
+
+  // Find all doors and their world coordinates
+  const doorInfos: Array<{id: string, worldX: number, worldZ: number, normX: number, normZ: number, width: number}> = []
+
+  for (const wall of walls) {
+    const dx = wall.end[0] - wall.start[0]
+    const dz = wall.end[1] - wall.start[1]
+    const len = Math.sqrt(dx * dx + dz * dz)
+    if (len < 0.001) continue
+    
+    const dirX = dx / len
+    const dirZ = dz / len
+    const normX = -dirZ
+    const normZ = dirX
+
+    for (const childId of wall.children) {
+      const child = nodes[childId as AnyNodeId]
+      if (child && child.type === 'door') {
+        const door = child as DoorNode
+        const localX = door.position[0]
+        const worldX = wall.start[0] + dirX * localX
+        const worldZ = wall.start[1] + dirZ * localX
+        
+        doorInfos.push({
+          id: door.id,
+          worldX,
+          worldZ,
+          normX,
+          normZ,
+          width: door.width ?? 0.9
+        })
+      }
+    }
+  }
+
+  // 1. Door Clearance (Circulation)
+  const floorItems = items.filter(i => i.asset.attachTo !== 'wall' && i.asset.attachTo !== 'wall-side' && i.asset.attachTo !== 'ceiling')
+  
+  for (const door of doorInfos) {
+    for (const item of floorItems) {
+      const dist = dist2D([door.worldX, door.worldZ], [item.position[0], item.position[2]])
+      const dim = getScaledDimensions(item)
+      const itemRadius = Math.max(dim[0], dim[2]) / 2
+      
+      // Minimum required clearance: door half width + 0.5m clearance + item radius
+      const requiredClearance = (door.width / 2) + 0.5 + itemRadius
+      
+      if (dist < requiredClearance) {
+        issues.push({
+          type: 'overlap',
+          severity: 'warning',
+          nodeId: item.id,
+          message: `Furniture "${item.asset.name}" is blocking the door (clearance < 0.5m).`,
+        })
+      }
+    }
+  }
+
+  // 2. Exterior Door Floating Risk
+  if (!isGroundLevel) {
+    for (const door of doorInfos) {
+      // Check 0.5m away from door center in both normal directions
+      const pt1 = [door.worldX + door.normX * 0.5, door.worldZ + door.normZ * 0.5]
+      const pt2 = [door.worldX - door.normX * 0.5, door.worldZ - door.normZ * 0.5]
+      
+      let pt1InSlab = false
+      let pt2InSlab = false
+      
+      for (const slab of slabs) {
+        if (slab.polygon.length >= 3) {
+          if (pointInPolygon(pt1[0]!, pt1[1]!, slab.polygon)) pt1InSlab = true
+          if (pointInPolygon(pt2[0]!, pt2[1]!, slab.polygon)) pt2InSlab = true
+        }
+      }
+      
+      // If one side is in a slab, but the other is completely outside any slab, it's an exterior door.
+      if ((pt1InSlab && !pt2InSlab) || (!pt1InSlab && pt2InSlab)) {
+        issues.push({
+          type: 'code',
+          severity: 'warning',
+          nodeId: door.id,
+          message: `Exterior door detected on an upper floor without a balcony/slab outside. Fall hazard!`,
+        })
+      }
+    }
+  }
+}
+
+function validateBuildingCodeBasics(
+  walls: WallNode[],
+  slabs: SlabNode[],
+  nodes: Record<AnyNodeId, AnyNode>,
+  issues: ValidationIssue[],
+): void {
+  const doorsBySlab = collectDoorsBySlab(slabs, walls, nodes)
+
+  for (const wall of walls) {
+    const wallLen = wallLength(wall)
+    for (const childId of wall.children) {
+      const child = nodes[childId as AnyNodeId]
+      if (!child) continue
+
+      if (child.type === 'door') {
+        const door = child as DoorNode
+        const doorWidth = door.width ?? 0.9
+        if (doorWidth < MIN_DOOR_CLEAR_WIDTH) {
+          issues.push({
+            type: 'code',
+            severity: 'warning',
+            nodeId: door.id,
+            message: `Door width ${doorWidth.toFixed(2)}m is below the ${MIN_DOOR_CLEAR_WIDTH.toFixed(2)}m minimum clear-width target.`,
+          })
+        }
+
+        if (wallLen > 0 && doorWidth > wallLen * 0.75) {
+          issues.push({
+            type: 'code',
+            severity: 'warning',
+            nodeId: door.id,
+            message: `Door consumes too much of a short wall (${doorWidth.toFixed(2)}m door on ${wallLen.toFixed(2)}m wall).`,
+          })
+        }
+      }
+
+      if (child.type === 'window') {
+        const win = child as WindowNode
+        const sillCenter = win.position[1]
+        const winHeight = win.height ?? 1.5
+        const sillBottom = sillCenter - winHeight / 2
+        if (sillBottom < 0.75) {
+          issues.push({
+            type: 'code',
+            severity: 'warning',
+            nodeId: win.id,
+            message: `Window sill is low (${sillBottom.toFixed(2)}m). Check fall protection or raise sill height.`,
+          })
+        }
+      }
+    }
+  }
+
+  for (const slab of slabs) {
+    if (slab.polygon.length < 3) continue
+    const bounds = polygonBounds(slab.polygon)
+    const shortSide = Math.min(bounds.width, bounds.depth)
+    const longSide = Math.max(bounds.width, bounds.depth)
+    const area = polygonArea(slab.polygon)
+    const isLikelyCorridor = longSide >= 3 && shortSide <= 1.6
+
+    if (isLikelyCorridor && shortSide < MIN_CORRIDOR_WIDTH) {
+      issues.push({
+        type: 'code',
+        severity: 'warning',
+        nodeId: slab.id,
+        message: `Corridor clear width is about ${shortSide.toFixed(2)}m; keep circulation at least ${MIN_CORRIDOR_WIDTH.toFixed(2)}m wide.`,
+      })
+    }
+
+    if (area > 0 && area < 2) {
+      issues.push({
+        type: 'code',
+        severity: 'warning',
+        nodeId: slab.id,
+        message: `Room/slab area is only ${area.toFixed(1)} sqm, which is too small for a usable enclosed space.`,
+      })
+    }
+
+    if (area >= 4 && (doorsBySlab.get(slab.id)?.length ?? 0) === 0) {
+      issues.push({
+        type: 'code',
+        severity: 'warning',
+        nodeId: slab.id,
+        message: `Room/slab ${slab.id} has no associated door/opening. Add a doorway for circulation.`,
+      })
+    }
+  }
+}
+
+function detectSlabOverlaps(
+  slabs: SlabNode[],
+  issues: ValidationIssue[],
+): void {
+  for (let i = 0; i < slabs.length; i++) {
+    for (let j = i + 1; j < slabs.length; j++) {
+      const a = slabs[i]!
+      const b = slabs[j]!
+      
+      if (a.polygon.length < 3 || b.polygon.length < 3) continue
+      
+      // Fast check: is any vertex of A inside B?
+      let overlap = false
+      for (const pt of a.polygon) {
+        if (pointInPolygon(pt[0], pt[1], b.polygon)) {
+          overlap = true
+          break
+        }
+      }
+      // Or any vertex of B inside A?
+      if (!overlap) {
+        for (const pt of b.polygon) {
+          if (pointInPolygon(pt[0], pt[1], a.polygon)) {
+            overlap = true
+            break
+          }
+        }
+      }
+      
+      if (overlap) {
+        issues.push({
+          type: 'overlap',
+          severity: 'warning',
+          nodeId: a.id,
+          message: `Room/Slab footprint overlaps with another room. Ensure they are adjacent, not intersecting.`,
+        })
+      }
+    }
+  }
+}
+
 // ============================================================================
 // MAIN VALIDATOR
 // ============================================================================
@@ -350,27 +975,57 @@ export function validateAndCorrectScene(levelId: string): ValidationResult {
   validateDoorWindowFit(walls, nodes, issues)
   validateFurnitureBounds(items, slabs, issues)
   detectWallGaps(walls, issues)
+  detectDoorWindowOverlap(walls, nodes, issues)
+  validateFurnitureCollision(items, issues)
+  validatePhysicsAndStructure(items, slabs, walls, nodes, issues)
+  validateArchitectureDesign(items, slabs, walls, nodes, issues)
+  checkCirculationAndSafety(levelId, walls, slabs, items, nodes, issues)
+  detectSlabOverlaps(slabs, issues)
+  validateBuildingCodeBasics(walls, slabs, nodes, issues)
 
   const fixedCount = issues.filter((i) => i.severity === 'fixed').length
   const warningCount = issues.filter((i) => i.severity === 'warning').length
+  const blockingCount = issues.filter((i) => i.severity === 'warning' && (i.type === 'code' || i.type === 'bounds' || i.type === 'gap' || i.type === 'overlap')).length
 
-  return { issues, fixedCount, warningCount }
+  return { issues, fixedCount, warningCount, blockingCount }
 }
 
 export function formatValidationReport(result: ValidationResult): string {
+  const blocking = result.blockingCount > 0
+  const issueSummary = result.issues.reduce<Record<string, number>>((acc, issue) => {
+    acc[issue.type] = (acc[issue.type] ?? 0) + 1
+    return acc
+  }, {})
+
   if (result.issues.length === 0) {
-    return JSON.stringify({ valid: true, message: 'No spatial issues found' })
+    return JSON.stringify({
+      valid: true,
+      blocking: false,
+      fixedCount: 0,
+      warningCount: 0,
+      blockingCount: 0,
+      issueSummary: {},
+      issues: [],
+      message: 'No spatial or building-code issues found',
+      nextAction: 'Continue to the next staged generation phase.',
+    })
   }
 
   return JSON.stringify({
-    valid: result.warningCount === 0,
+    valid: !blocking,
+    blocking,
     fixedCount: result.fixedCount,
     warningCount: result.warningCount,
+    blockingCount: result.blockingCount,
+    issueSummary,
     issues: result.issues.map((i) => ({
       type: i.type,
       severity: i.severity,
       nodeId: i.nodeId,
       message: i.message,
     })),
+    nextAction: blocking
+      ? 'Fix blocking warnings before continuing to furniture, roof, decoration, or finalization.'
+      : 'Only informational issues remain; continue to the next staged generation phase.',
   })
 }

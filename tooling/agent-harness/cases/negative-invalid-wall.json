@@ -1,0 +1,24 @@
+{
+  "name": "negative-invalid-wall",
+  "description": "Invalid wall input returns an error and does not add scene geometry.",
+  "steps": [
+    {
+      "tool": "create_walls",
+      "args": {
+        "walls": [
+          {
+            "start": [0, 0],
+            "end": [0, 0]
+          }
+        ]
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 0, "expected": false },
+    { "type": "node.count", "nodeType": "wall", "exact": 0 },
+    { "type": "node.count", "nodeType": "slab", "exact": 0 },
+    { "type": "node.count", "nodeType": "door", "exact": 0 },
+    { "type": "validation", "valid": true, "blocking": false, "warningCount": 0 }
+  ]
+}

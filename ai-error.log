@@ -1,0 +1,73 @@
+2026-05-31T08:21:36.482Z: Error: Request timed out.
+2026-05-31T08:26:21.629Z: Error: Request timed out.
+2026-05-31T08:31:18.089Z: [AI Request] Provider: deepseek | Model: deepseek-v4-pro | BaseURL: https://api.deepseek.com | APIKey: sk-0cc...9ccb | Stream: true
+2026-05-31T08:31:53.022Z: Error: Request timed out.
+2026-05-31T08:35:18.137Z: [AI Request] Provider: deepseek | Model: deepseek-v4-pro | BaseURL: https://api.deepseek.com | APIKey: sk-0cc...9ccb | Stream: true
+2026-05-31T08:35:52.713Z: Error: Request timed out.
+2026-05-31T08:36:47.966Z: [AI Request] Provider: deepseek | Model: deepseek-v4-pro | BaseURL: https://api.deepseek.com | APIKey: sk-0cc...9ccb | Stream: true
+2026-05-31T08:37:26.033Z: Error: Request timed out.
+2026-05-31T08:42:05.070Z: [AI Request] Provider: deepseek | Model: deepseek-chat | BaseURL: https://api.deepseek.com | APIKey: sk-0cc...9ccb | Stream: true
+2026-05-31T08:42:39.247Z: Error: Request timed out.
+2026-05-31T08:49:58.847Z: [AI Request] Provider: deepseek | Model: deepseek-chat | BaseURL: https://api.deepseek.com | APIKey: sk-0cc...9ccb | Stream: false
+2026-05-31T08:50:32.351Z: Error: Request timed out.
+2026-05-31T08:50:49.305Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: false
+2026-05-31T08:51:23.794Z: Error: Request timed out.
+2026-05-31T08:52:09.921Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: false
+2026-05-31T08:52:43.214Z: Error: Request timed out.
+2026-05-31T08:52:57.540Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: false
+2026-05-31T08:53:35.782Z: Error: Request timed out.
+2026-05-31T09:22:24.759Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: false
+2026-05-31T09:22:56.482Z: Error: Request timed out.
+2026-05-31T09:27:39.779Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: false | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T09:27:47.405Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T09:28:18.078Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T09:31:02.751Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: invali...alid | Stream: false | Proxy candidates: http://127.0.0.1:7890, http://127.0.0.1:9674
+2026-05-31T09:31:03.405Z: Error: 401 Invalid API Key
+2026-05-31T09:32:15.727Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: false | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T09:32:24.182Z: [AI Request] Provider: deepseek | Model: deepseek-chat | BaseURL: https://api.deepseek.com | APIKey: tp-c9i...tvce | Stream: false | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T09:32:24.945Z: Error: 401 Authentication Fails, Your api key: ****tvce is invalid
+2026-05-31T09:32:31.960Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: false | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T09:56:04.624Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T09:56:10.813Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T09:56:27.934Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T09:56:43.321Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T09:56:47.536Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T09:56:53.957Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T09:56:57.635Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T09:57:05.251Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T09:57:09.627Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T09:57:13.125Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T09:57:16.457Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T09:57:19.609Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T09:57:23.842Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:03:10.306Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:03:15.469Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:03:18.674Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:03:21.074Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:03:23.484Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:03:36.773Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:05:20.748Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:05:34.707Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:05:49.802Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:06:06.531Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:06:11.880Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:06:15.737Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:06:25.670Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:06:32.818Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:06:39.805Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:06:44.840Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:06:52.285Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:07:02.879Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:07:47.721Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:07:54.848Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:08:02.460Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:08:06.655Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:08:19.202Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:08:26.399Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:08:31.482Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:08:35.369Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:08:43.215Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:08:47.418Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:23:55.908Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: false | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:24:02.854Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674
+2026-05-31T10:24:10.299Z: [AI Request] Provider: xiaomi | Model: mimo-v2.5-pro | BaseURL: https://token-plan-cn.xiaomimimo.com/v1 | APIKey: tp-c9i...tvce | Stream: true | Proxy candidates: http://127.0.0.1:9674

@@ -316,7 +316,7 @@ export const agentTools: ChatCompletionTool[] = [
     function: {
       name: 'create_apartment',
       description:
-        'High-level helper: Create a multi-room apartment layout. Rooms are placed adjacent to each other sharing walls. Specify room list with names and dimensions.',
+        'High-level helper: Create a simple multi-room apartment layout. Rooms are placed adjacent to each other in rows. For complex/code-sensitive requests, use this only for the layout phase, then validate before adding openings, furniture, roof, or details.',
       parameters: {
         type: 'object',
         properties: {
@@ -918,7 +918,7 @@ export const agentTools: ChatCompletionTool[] = [
     function: {
       name: 'create_building_shell',
       description:
-        'Create a complete building shell in one call: 4 walls + floor slab + ceiling + optional roof with door and windows. Ideal for creating a single-room building quickly.',
+        'Create a complete single-room building shell in one call: 4 walls + floor slab + ceiling + optional roof with door and windows. Use for small/simple shells only. For houses, villas, offices, multi-room, or code-sensitive work, generate in phases and validate between phases.',
       parameters: {
         type: 'object',
         properties: {
@@ -968,7 +968,7 @@ export const agentTools: ChatCompletionTool[] = [
     function: {
       name: 'create_furnished_apartment',
       description:
-        'Create a multi-room apartment AND automatically furnish each room based on its name/type. Combines create_apartment + furnish_room. Room names like "客厅", "卧室", "厨房", "卫生间", "餐厅", "书房" are auto-detected for furniture placement.',
+        'Rapid concept helper: create a simple multi-room apartment AND automatically furnish each room based on its name/type. Combines create_apartment + furnish_room. Do NOT use for complex, production, code-sensitive, multi-story, villa, office, or user-reviewed generation; instead create layout, validate, add openings, validate, then furnish.',
       parameters: {
         type: 'object',
         properties: {
@@ -1302,13 +1302,81 @@ export const agentTools: ChatCompletionTool[] = [
       },
     },
   },
+  // ── Macro Building & Modeling ──
+  {
+    type: 'function',
+    function: {
+      name: 'auto_align_windows',
+      description: 'Automatically place and align windows evenly across multiple specified walls.',
+      parameters: {
+        type: 'object',
+        properties: {
+          wallIds: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of wall IDs to add windows to.',
+          },
+          windowWidth: {
+            type: 'number',
+            description: 'Width of each window in meters (default: 1.5).',
+          },
+          windowHeight: {
+            type: 'number',
+            description: 'Height of each window in meters (default: 1.5).',
+          },
+          sillHeight: {
+            type: 'number',
+            description: 'Height of the window sill from the floor in meters (default: 0.9).',
+          },
+          spacing: {
+            type: 'number',
+            description: 'Target spacing between windows in meters (default: 1.0).',
+          },
+        },
+        required: ['wallIds'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'build_staircase',
+      description: 'Build a staircase connecting two specific levels, including necessary slab cutouts.',
+      parameters: {
+        type: 'object',
+        properties: {
+          startLevelId: {
+            type: 'string',
+            description: 'The ID of the lower level where the staircase starts.',
+          },
+          endLevelId: {
+            type: 'string',
+            description: 'The ID of the upper level where the staircase ends.',
+          },
+          position: {
+            type: 'array',
+            items: { type: 'number' },
+            minItems: 3,
+            maxItems: 3,
+            description: 'Position [x, y, z] on the start level where the staircase begins.',
+          },
+          type: {
+            type: 'string',
+            enum: ['straight', 'l-shaped', 'u-shaped', 'spiral'],
+            description: 'The type/shape of the staircase (default: straight).',
+          },
+        },
+        required: ['startLevelId', 'endLevelId'],
+      },
+    },
+  },
   // ── Spatial Validation ──
   {
     type: 'function',
     function: {
       name: 'validate_scene',
       description:
-        'Validate and auto-correct spatial issues on the current level. Fixes: wall endpoint gaps (snaps within 5cm), furniture outside room boundaries (nudges inside), door/window overflows (clamps position). Also reports warnings for walls with gaps. Auto-runs after every scene modification, but can be called manually to inspect.',
+        'Validate and auto-correct spatial issues on the current level. Fixes: wall endpoint gaps (snaps within 5cm), furniture outside room boundaries (nudges inside), door/window overflows (clamps position). Reports warnings for wall gaps, overlaps, circulation, simplified building-code guardrails, daylight/ventilation, door widths, corridor widths, room proportions, and upper-floor fall hazards. Auto-runs after every scene modification, but can be called manually to inspect before continuing.',
       parameters: {
         type: 'object',
         properties: {},

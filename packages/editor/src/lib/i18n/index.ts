@@ -11,7 +11,7 @@ interface I18nStore {
 }
 
 export const useI18n = create<I18nStore>((set) => ({
-  locale: (typeof window !== 'undefined' && (localStorage.getItem('pascal-locale') as Locale)) || 'en',
+  locale: 'en',
   setLocale: (locale) => {
     if (typeof window !== 'undefined') localStorage.setItem('pascal-locale', locale)
     set({ locale })

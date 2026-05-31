@@ -1,0 +1,25 @@
+{
+  "name": "rectangular-room",
+  "description": "Create one rectangular room with a door and slab.",
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": {
+        "origin": [0, 0],
+        "width": 5,
+        "depth": 4,
+        "addDoor": true,
+        "doorWall": "front",
+        "addWindows": false
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 0 },
+    { "type": "node.count", "nodeType": "wall", "exact": 4 },
+    { "type": "node.count", "nodeType": "slab", "exact": 1 },
+    { "type": "node.count", "nodeType": "door", "exact": 1 },
+    { "type": "geometry.closedWalls", "tolerance": 0.001 },
+    { "type": "validation", "valid": true, "blocking": false, "warningCount": 0 }
+  ]
+}

@@ -18,6 +18,7 @@ import { useT } from '../../../../../lib/i18n'
 import { useAgent, type AIProvider, type ChatMessage } from '../../../../../store/use-agent'
 
 const PROVIDERS: { id: AIProvider; label: string; placeholder: string }[] = [
+  { id: 'xiaomi', label: 'Xiaomi MiMo', placeholder: 'mimo-...' },
   { id: 'deepseek', label: 'DeepSeek', placeholder: 'sk-...' },
   { id: 'openai', label: 'OpenAI', placeholder: 'sk-...' },
 ]
@@ -423,8 +424,52 @@ function SettingsPanel() {
   const settings = useAgent((s) => s.settings)
   const setSettings = useAgent((s) => s.setSettings)
   const [showKey, setShowKey] = useState(false)
+  const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'failed'>('idle')
+  const [testError, setTestError] = useState<string | null>(null)
 
   const currentProvider = PROVIDERS.find((p) => p.id === settings.provider) || PROVIDERS[0]!
+
+  const handleTestConnection = async () => {
+    if (!settings.apiKey) {
+      setTestStatus('failed')
+      setTestError('请先填入 API Key')
+      return
+    }
+
+    setTestStatus('testing')
+    setTestError(null)
+
+    try {
+      const res = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: 'Say hello in 1-3 words' }],
+          provider: settings.provider,
+          apiKey: settings.apiKey,
+          model: settings.model || undefined,
+          baseURL: settings.baseURL || undefined,
+          proxyURL: settings.proxyURL || undefined,
+          stream: false,
+        }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({ error: '请求失败' }))
+        throw new Error(data.error || `HTTP 错误: ${res.status}`)
+      }
+
+      const data = await res.json()
+      if (data.choices?.[0]?.message?.content) {
+        setTestStatus('success')
+      } else {
+        throw new Error(data.error || '返回数据格式不正确')
+      }
+    } catch (err: any) {
+      setTestStatus('failed')
+      setTestError(err.message || '网络连接超时或解析失败')
+    }
+  }
 
   return (
     <div className="space-y-3 border-border/50 border-b px-3 py-3">
@@ -474,6 +519,42 @@ function SettingsPanel() {
         </div>
       </div>
 
+      {/* API Base URL */}
+      <div className="space-y-1.5">
+        <label className="font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
+          API Base URL <span className="normal-case tracking-normal opacity-60">(自定义代理)</span>
+        </label>
+        <input
+          className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+          onChange={(e) => setSettings({ baseURL: e.target.value })}
+          placeholder={
+            settings.provider === 'xiaomi'
+              ? 'https://token-plan-cn.xiaomimimo.com/v1'
+              : settings.provider === 'deepseek'
+              ? 'https://api.deepseek.com'
+              : 'https://api.openai.com/v1'
+          }
+          type="text"
+          value={settings.baseURL || ''}
+          {...stopEditorCapture}
+        />
+      </div>
+
+      {/* Proxy URL (optional) */}
+      <div className="space-y-1.5">
+        <label className="font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
+          代理服务器 <span className="normal-case tracking-normal opacity-60">(可选，如 http://127.0.0.1:7890)</span>
+        </label>
+        <input
+          className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+          onChange={(e) => setSettings({ proxyURL: e.target.value })}
+          placeholder="http://127.0.0.1:7890"
+          type="text"
+          value={settings.proxyURL || ''}
+          {...stopEditorCapture}
+        />
+      </div>
+
       {/* Model override (optional) */}
       <div className="space-y-1.5">
         <label className="font-medium text-[11px] text-muted-foreground uppercase tracking-wider">
@@ -482,7 +563,13 @@ function SettingsPanel() {
         <input
           className="w-full rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary"
           onChange={(e) => setSettings({ model: e.target.value })}
-          placeholder={settings.provider === 'deepseek' ? 'deepseek-v4-pro' : 'gpt-4o'}
+          placeholder={
+            settings.provider === 'xiaomi'
+              ? 'mimo-v2.5-pro'
+              : settings.provider === 'deepseek'
+              ? 'deepseek-chat'
+              : 'gpt-4o'
+          }
           type="text"
           value={settings.model}
           {...stopEditorCapture}
@@ -495,6 +582,37 @@ function SettingsPanel() {
           已配置 — {currentProvider.label}
         </div>
       )}
+
+      {/* Test Connection Button */}
+      <div className="pt-1">
+        <button
+          className={`w-full rounded-md py-1.5 text-xs font-medium transition-colors border ${
+            testStatus === 'testing'
+              ? 'bg-accent text-muted-foreground border-border cursor-not-allowed'
+              : testStatus === 'success'
+              ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20 hover:bg-emerald-500/15'
+              : testStatus === 'failed'
+              ? 'bg-destructive/10 text-destructive border-destructive/20 hover:bg-destructive/15'
+              : 'bg-primary text-primary-foreground border-transparent hover:bg-primary/90'
+          }`}
+          disabled={testStatus === 'testing'}
+          onClick={handleTestConnection}
+          type="button"
+        >
+          {testStatus === 'testing' ? '正在测试连接...' : '测试 API 连通性'}
+        </button>
+        {testStatus === 'success' && (
+          <p className="mt-1.5 text-[10px] text-emerald-500 flex items-center gap-1 leading-normal">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            连接成功！模型响应正常。
+          </p>
+        )}
+        {testStatus === 'failed' && (
+          <p className="mt-1.5 text-[10px] text-destructive leading-normal">
+            ❌ 连接失败: {testError}
+          </p>
+        )}
+      </div>
     </div>
   )
 }

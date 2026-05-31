@@ -1,0 +1,28 @@
+{
+  "name": "room-ceiling-windows",
+  "description": "Create a room with ceiling and windows.",
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": {
+        "origin": [0, 0],
+        "width": 6,
+        "depth": 5,
+        "addDoor": true,
+        "doorWall": "front",
+        "addWindows": true,
+        "addCeiling": true,
+        "ceilingHeight": 2.6
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 0 },
+    { "type": "node.count", "nodeType": "wall", "exact": 4 },
+    { "type": "node.count", "nodeType": "window", "exact": 3 },
+    { "type": "node.count", "nodeType": "ceiling", "exact": 1 },
+    { "type": "node.exists", "nodeType": "ceiling", "where": { "height": { "approx": 2.6, "tolerance": 0.001 } } },
+    { "type": "geometry.closedWalls", "tolerance": 0.001 },
+    { "type": "validation", "valid": true, "blocking": false, "warningCount": 0 }
+  ]
+}

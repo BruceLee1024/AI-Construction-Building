@@ -1,0 +1,24 @@
+{
+  "name": "polygon-room-closure",
+  "description": "Create a non-rectangular polygon room and verify wall closure.",
+  "steps": [
+    {
+      "tool": "create_polygon_room",
+      "args": {
+        "polygon": [[0, 0], [5, 0], [5, 3], [3, 3], [3, 5], [0, 5]],
+        "addDoor": true,
+        "doorEdgeIndex": 0,
+        "addSlab": true,
+        "zoneName": "L Room"
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 0 },
+    { "type": "node.count", "nodeType": "wall", "exact": 6 },
+    { "type": "node.count", "nodeType": "slab", "exact": 1 },
+    { "type": "node.exists", "nodeType": "zone", "where": { "name": "L Room" } },
+    { "type": "geometry.closedWalls", "tolerance": 0.001 },
+    { "type": "validation", "valid": true, "blocking": false, "warningCount": 0 }
+  ]
+}
