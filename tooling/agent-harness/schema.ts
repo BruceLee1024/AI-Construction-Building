@@ -107,6 +107,15 @@ export type OpeningsFitWallAssertion = {
   type: 'geometry.openingsFitWall'
 }
 
+export type FurnitureInsideSlabsAssertion = {
+  type: 'geometry.furnitureInsideSlabs'
+}
+
+export type NoFurnitureOverlapAssertion = {
+  type: 'geometry.noFurnitureOverlap'
+  clearance?: number
+}
+
 export type CountExpectation =
   | number
   | {
@@ -135,6 +144,8 @@ export type HarnessAssertion =
   | MinClearanceAssertion
   | NoSlabOverlapAssertion
   | OpeningsFitWallAssertion
+  | FurnitureInsideSlabsAssertion
+  | NoFurnitureOverlapAssertion
   | ValidationRepairHintsAssertion
   | ValidationAssertion
 

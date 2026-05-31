@@ -85,9 +85,11 @@ The executor may block or defer a tool call:
 | Build staircase between levels | \`build_staircase\` |
 | Add door during room creation | Set \`addDoor: true\` in create_room |
 | Add ceiling to room | Set \`addCeiling: true\` in create_room |
-| Place furniture by coordinates | \`place_furniture\` |
-| Place furniture by semantic anchor (north-wall, center…) | \`place_in_room\` ⭐ preferred |
-| Place furniture flush against a specific wall | \`place_against_wall\` ⭐ preferred |
+| Preview furniture layout without creating nodes | \`suggest_furniture_layout\` ⭐ preferred |
+| Place furniture with spatial solver | \`place_furniture_solved\` ⭐ preferred |
+| Place furniture by coordinates | \`place_furniture\` fallback only |
+| Place furniture by semantic anchor (north-wall, center…) | \`place_in_room\` |
+| Place furniture flush against a specific wall | \`place_against_wall\` |
 | Auto-furnish entire room | \`furnish_room\` |
 | Create corridor / hallway | \`create_hallway\` |
 | Complete building (walls+slab+ceiling+roof) | \`create_building_shell\` |
@@ -149,6 +151,11 @@ Every room/furniture tool now returns **spatial context** — use it instead of 
   - \`wallsByFace\`: {south, east, north, west} with wall IDs, endpoints, length
   - \`slabPolygon\`: actual slab vertices
 
+- \`suggest_furniture_layout\` / \`place_furniture_solved\` return:
+  - \`placements\`: feasible furniture positions with rotation, bbox, score, clearanceScore
+  - \`blockedZones\`: door/window/existing-furniture zones the solver avoided
+  - \`rejections\`: structured reasons when an item cannot fit
+
 - \`place_furniture\` / \`place_in_room\` / \`place_against_wall\` return:
   - \`bbox\`: actual world-space bounding box {minX, minZ, maxX, maxZ}
   - \`insideSlabId\`: which room slab contains the item (null = outside all rooms!)
@@ -160,18 +167,24 @@ Every room/furniture tool now returns **spatial context** — use it instead of 
 
 **Always check \`insideSlabId\` and \`warning\` in placement results.** If an item is outside a room, fix it immediately.
 
-### Semantic Placement (preferred over raw coordinates)
+### Furniture Solver (preferred over raw coordinates)
 
-When placing individual furniture items, **prefer \`place_in_room\` and \`place_against_wall\`** over \`place_furniture\`:
+When placing furniture, **prefer \`suggest_furniture_layout\`, \`place_furniture_solved\`, or \`furnish_room\`**. Use raw \`place_furniture\` only when the user explicitly gives exact coordinates.
 
 \`\`\`
 // ❌ Error-prone: manually computing coordinates
 place_furniture({ type: "double-bed", position: [5.75, 0, 3.3], rotation: 0 })
 
-// ✅ Reliable: semantic anchor — system computes exact position
+// ✅ Best: solver avoids doors, windows, existing furniture, and circulation conflicts
+place_furniture_solved({ roomType: "bedroom", slabId: "slab_abc", items: ["double-bed", "bedside-table", "closet"] })
+
+// ✅ Preview only: use before creating furniture when unsure
+suggest_furniture_layout({ roomType: "living", slabId: "slab_abc" })
+
+// ✅ Semantic anchor — system validates or adjusts the target
 place_in_room({ type: "double-bed", anchor: "north-wall", orientation: "facing-south", roomOrigin: [4, 0], roomWidth: 3.5, roomDepth: 4 })
 
-// ✅ Wall-relative — system computes perpendicular offset
+// ✅ Wall-relative — system validates or adjusts the target
 place_against_wall({ type: "bookshelf", wallId: "wall_abc", position_t: 0.3, facing: "toward-wall" })
 \`\`\`
 
