@@ -1,0 +1,28 @@
+{
+  "name": "china-wetroom-adjacency-hint",
+  "description": "An isolated wet room should produce the non-blocking wetroom.adjacency_hint.",
+  "validationArgs": { "codeProfile": "china_residential" },
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": {
+        "origin": [0, 0],
+        "width": 2.2,
+        "depth": 2.2,
+        "addDoor": true,
+        "addWindows": true
+      }
+    },
+    {
+      "tool": "create_zone",
+      "args": {
+        "name": "厨房",
+        "roomType": "kitchen",
+        "polygon": [[0.1, 0.1], [2.1, 0.1], [2.1, 2.1], [0.1, 2.1]]
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "validation", "valid": true, "blocking": false, "codeProfile": "china_residential", "issueSummary": { "info": { "min": 1 } }, "mustIncludeRuleIds": ["wetroom.adjacency_hint"], "mustExcludeRuleIds": ["room.kitchen_min_area", "room.kitchen_min_width", "room.kitchen_ventilation"] }
+  ]
+}

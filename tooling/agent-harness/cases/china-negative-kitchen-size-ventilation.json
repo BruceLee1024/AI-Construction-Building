@@ -1,0 +1,27 @@
+{
+  "name": "china-negative-kitchen-size-ventilation",
+  "description": "A narrow kitchen without windows should report kitchen size and ventilation rule IDs.",
+  "validationArgs": { "codeProfile": "china_residential" },
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": {
+        "origin": [0, 0],
+        "width": 1.4,
+        "depth": 3,
+        "addDoor": true,
+        "addWindows": false
+      }
+    },
+    {
+      "tool": "create_zone",
+      "args": {
+        "name": "Kitchen",
+        "polygon": [[0.1, 0.1], [1.3, 0.1], [1.3, 2.9], [0.1, 2.9]]
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "validation", "valid": false, "blocking": true, "codeProfile": "china_residential", "mustIncludeRuleIds": ["room.kitchen_min_width", "room.kitchen_ventilation"] }
+  ]
+}

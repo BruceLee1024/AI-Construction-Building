@@ -1,0 +1,46 @@
+{
+  "name": "china-negative-opening-clearance-spacing",
+  "description": "Openings near a wall end or too close to each other should produce stable opening rule IDs.",
+  "validationArgs": { "codeProfile": "china_residential" },
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": {
+        "origin": [0, 0],
+        "width": 5,
+        "depth": 4,
+        "addDoor": false,
+        "addWindows": false
+      }
+    },
+    {
+      "tool": "create_door",
+      "args": {
+        "wallIndex": 0,
+        "width": 0.8,
+        "position_t": 0.11
+      }
+    },
+    {
+      "tool": "create_window",
+      "args": {
+        "wallIndex": 2,
+        "width": 1.2,
+        "position_t": 0.3,
+        "sillHeight": 1
+      }
+    },
+    {
+      "tool": "create_window",
+      "args": {
+        "wallIndex": 2,
+        "width": 1.2,
+        "position_t": 0.55,
+        "sillHeight": 1
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "validation", "valid": false, "blocking": true, "codeProfile": "china_residential", "mustIncludeRuleIds": ["opening.edge_clearance", "opening.min_spacing"] }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "name": "china-window-fall-protection",
+  "description": "A low window sill should produce window.fall_protection under china_residential.",
+  "validationArgs": { "codeProfile": "china_residential" },
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": {
+        "origin": [0, 0],
+        "width": 4,
+        "depth": 4,
+        "addDoor": true,
+        "addWindows": false
+      }
+    },
+    {
+      "tool": "create_window",
+      "args": {
+        "wallIndex": 2,
+        "width": 1.5,
+        "height": 1,
+        "position_t": 0.5,
+        "sillHeight": 0.4
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "validation", "valid": false, "blocking": true, "codeProfile": "china_residential", "mustIncludeRuleIds": ["window.fall_protection"] }
+  ]
+}

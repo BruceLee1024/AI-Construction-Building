@@ -854,11 +854,13 @@ function validateArchitectureDesign(
   items: ItemNode[],
   slabs: SlabNode[],
   walls: WallNode[],
+  zones: ZoneNode[],
   nodes: Record<AnyNodeId, AnyNode>,
   issues: ValidationIssue[],
   profile: CodeProfile,
 ): void {
   const windowsBySlab = collectWindowsBySlab(slabs, walls, nodes)
+  const zonesBySlab = collectZonesBySlab(slabs, zones)
 
   for (const slab of slabs) {
     if (slab.polygon.length < 3) continue
@@ -872,6 +874,8 @@ function validateArchitectureDesign(
     const longSide = Math.max(bounds.width, bounds.depth)
     const aspectRatio = shortSide > 0 ? longSide / shortSide : Infinity
     const isLikelyCorridor = longSide >= 3 && shortSide <= 1.6
+    const roomUses = roomUsesForSlab(slab, zonesBySlab)
+    const isMainSpace = roomUses.has('bedroom') || roomUses.has('living') || roomUses.has('dining')
 
     if (area >= 8 && windows.length === 0) {
       issues.push({
@@ -888,6 +892,36 @@ function validateArchitectureDesign(
         ruleId: 'room.daylight_ratio',
         nodeId: slab.id,
         message: `Room/slab ${slab.id} daylight ratio is low (${(daylightRatio * 100).toFixed(1)}%). Add or enlarge windows.`,
+      })
+    }
+
+    if (isMainSpace && area >= 6 && daylightRatio < profile.minDaylightRatio) {
+      issues.push({
+        type: 'code',
+        severity: 'warning',
+        ruleId: 'room.main_space_daylight',
+        nodeId: slab.id,
+        message: `Main residential space daylight ratio is ${(daylightRatio * 100).toFixed(1)}%; target at least ${(profile.minDaylightRatio * 100).toFixed(0)}%.`,
+      })
+    }
+
+    if (roomUses.has('kitchen') && !hasVentilationStrategy('kitchen', windows, items)) {
+      issues.push({
+        type: 'code',
+        severity: 'warning',
+        ruleId: 'room.kitchen_ventilation',
+        nodeId: slab.id,
+        message: `Kitchen zone has no exterior window or modeled mechanical ventilation strategy.`,
+      })
+    }
+
+    if (roomUses.has('bathroom') && !hasVentilationStrategy('bathroom', windows, items)) {
+      issues.push({
+        type: 'code',
+        severity: 'warning',
+        ruleId: 'room.bathroom_ventilation',
+        nodeId: slab.id,
+        message: `Bathroom zone has no exterior window or modeled mechanical ventilation strategy.`,
       })
     }
 
@@ -927,6 +961,7 @@ function checkCirculationAndSafety(
   walls: WallNode[],
   slabs: SlabNode[],
   items: ItemNode[],
+  zones: ZoneNode[],
   nodes: Record<AnyNodeId, AnyNode>,
   issues: ValidationIssue[],
   profile: CodeProfile,
@@ -976,6 +1011,7 @@ function checkCirculationAndSafety(
       const dist = dist2D([door.worldX, door.worldZ], [item.position[0], item.position[2]])
       const dim = getScaledDimensions(item)
       const itemRadius = Math.max(dim[0], dim[2]) / 2
+      const clearance = dist - door.width / 2 - itemRadius
       
       // Minimum required clearance: door half width + 0.5m clearance + item radius
       const requiredClearance = (door.width / 2) + profile.minDoorClearance + itemRadius
@@ -989,6 +1025,33 @@ function checkCirculationAndSafety(
           message: `Furniture "${item.asset.name}" is blocking the door (clearance < ${profile.minDoorClearance.toFixed(1)}m).`,
         })
       }
+
+      if (clearance < profile.minFurnitureClearPath) {
+        issues.push({
+          type: 'overlap',
+          severity: 'warning',
+          ruleId: 'circulation.furniture_clear_path',
+          nodeId: item.id,
+          message: `Furniture "${item.asset.name}" leaves only ${clearance.toFixed(2)}m clear circulation near a doorway.`,
+        })
+      }
+    }
+  }
+
+  const zonesBySlab = collectZonesBySlab(slabs, zones)
+  for (const slab of slabs) {
+    if (slab.polygon.length < 3) continue
+    const uses = roomUsesForSlab(slab, zonesBySlab)
+    const bounds = polygonBounds(slab.polygon)
+    const shortSide = Math.min(bounds.width, bounds.depth)
+    if ((uses.has('entry') || uses.has('corridor')) && shortSide < profile.minEntryClearWidth) {
+      issues.push({
+        type: 'code',
+        severity: 'warning',
+        ruleId: 'circulation.entry_clear_width',
+        nodeId: slab.id,
+        message: `Entry/circulation clear width is ${shortSide.toFixed(2)}m; target at least ${profile.minEntryClearWidth.toFixed(2)}m.`,
+      })
     }
   }
 
@@ -1026,14 +1089,18 @@ function checkCirculationAndSafety(
 function validateBuildingCodeBasics(
   walls: WallNode[],
   slabs: SlabNode[],
+  zones: ZoneNode[],
   nodes: Record<AnyNodeId, AnyNode>,
   issues: ValidationIssue[],
   profile: CodeProfile,
 ): void {
   const doorsBySlab = collectDoorsBySlab(slabs, walls, nodes)
+  const zonesBySlab = collectZonesBySlab(slabs, zones)
 
   for (const wall of walls) {
     const wallLen = wallLength(wall)
+    const openings: Array<{ id: string; minX: number; maxX: number }> = []
+
     for (const childId of wall.children) {
       const child = nodes[childId as AnyNodeId]
       if (!child) continue
@@ -1041,6 +1108,10 @@ function validateBuildingCodeBasics(
       if (child.type === 'door') {
         const door = child as DoorNode
         const doorWidth = door.width ?? 0.9
+        const minX = door.position[0] - doorWidth / 2
+        const maxX = door.position[0] + doorWidth / 2
+        openings.push({ id: door.id, minX, maxX })
+
         if (doorWidth < profile.minDoorClearWidth) {
           issues.push({
             type: 'code',
@@ -1060,13 +1131,38 @@ function validateBuildingCodeBasics(
             message: `Door consumes too much of a short wall (${doorWidth.toFixed(2)}m door on ${wallLen.toFixed(2)}m wall).`,
           })
         }
+
+        if (minX < profile.minOpeningEdgeClearance || wallLen - maxX < profile.minOpeningEdgeClearance) {
+          issues.push({
+            type: 'code',
+            severity: 'warning',
+            ruleId: 'opening.edge_clearance',
+            nodeId: door.id,
+            message: `Door is too close to a wall end; keep at least ${profile.minOpeningEdgeClearance.toFixed(2)}m edge clearance.`,
+          })
+        }
       }
 
       if (child.type === 'window') {
         const win = child as WindowNode
+        const winWidth = win.width ?? 1.5
+        const minX = win.position[0] - winWidth / 2
+        const maxX = win.position[0] + winWidth / 2
+        openings.push({ id: win.id, minX, maxX })
         const sillCenter = win.position[1]
         const winHeight = win.height ?? 1.5
         const sillBottom = sillCenter - winHeight / 2
+
+        if (minX < profile.minOpeningEdgeClearance || wallLen - maxX < profile.minOpeningEdgeClearance) {
+          issues.push({
+            type: 'code',
+            severity: 'warning',
+            ruleId: 'opening.edge_clearance',
+            nodeId: win.id,
+            message: `Window is too close to a wall end; keep at least ${profile.minOpeningEdgeClearance.toFixed(2)}m edge clearance.`,
+          })
+        }
+
         if (sillBottom < profile.minWindowSillHeight) {
           issues.push({
             type: 'code',
@@ -1076,6 +1172,32 @@ function validateBuildingCodeBasics(
             message: `Window sill is low (${sillBottom.toFixed(2)}m). Check fall protection or raise sill height.`,
           })
         }
+
+        if (sillBottom + 1e-6 < profile.minFallProtectionSillHeight) {
+          issues.push({
+            type: 'code',
+            severity: 'warning',
+            ruleId: 'window.fall_protection',
+            nodeId: win.id,
+            message: `Window sill bottom is ${sillBottom.toFixed(2)}m; add fall protection or raise to ${profile.minFallProtectionSillHeight.toFixed(2)}m.`,
+          })
+        }
+      }
+    }
+
+    openings.sort((a, b) => a.minX - b.minX)
+    for (let i = 1; i < openings.length; i++) {
+      const prev = openings[i - 1]!
+      const current = openings[i]!
+      const spacing = current.minX - prev.maxX
+      if (spacing >= 0 && spacing < profile.minOpeningSpacing) {
+        issues.push({
+          type: 'code',
+          severity: 'warning',
+          ruleId: 'opening.min_spacing',
+          nodeId: current.id,
+          message: `Adjacent openings are only ${spacing.toFixed(2)}m apart; keep at least ${profile.minOpeningSpacing.toFixed(2)}m between openings.`,
+        })
       }
     }
   }
@@ -1087,6 +1209,7 @@ function validateBuildingCodeBasics(
     const longSide = Math.max(bounds.width, bounds.depth)
     const area = polygonArea(slab.polygon)
     const isLikelyCorridor = longSide >= 3 && shortSide <= 1.6
+    const roomUses = roomUsesForSlab(slab, zonesBySlab)
 
     if (isLikelyCorridor && shortSide < profile.minCorridorWidth) {
       issues.push({
@@ -1108,6 +1231,78 @@ function validateBuildingCodeBasics(
       })
     }
 
+    if (roomUses.has('bedroom')) {
+      if (area < profile.minBedroomArea) {
+        issues.push({
+          type: 'code',
+          severity: 'warning',
+          ruleId: 'room.bedroom_min_area',
+          nodeId: slab.id,
+          message: `Bedroom area is ${area.toFixed(1)} sqm; target at least ${profile.minBedroomArea.toFixed(1)} sqm.`,
+        })
+      }
+      if (shortSide < profile.minBedroomWidth) {
+        issues.push({
+          type: 'code',
+          severity: 'warning',
+          ruleId: 'room.bedroom_min_width',
+          nodeId: slab.id,
+          message: `Bedroom short side is ${shortSide.toFixed(2)}m; target at least ${profile.minBedroomWidth.toFixed(2)}m.`,
+        })
+      }
+    }
+
+    if (roomUses.has('living') && area < profile.minLivingArea) {
+      issues.push({
+        type: 'code',
+        severity: 'warning',
+        ruleId: 'room.living_min_area',
+        nodeId: slab.id,
+        message: `Living room area is ${area.toFixed(1)} sqm; target at least ${profile.minLivingArea.toFixed(1)} sqm.`,
+      })
+    }
+
+    if (roomUses.has('living') && shortSide < profile.minLivingWidth) {
+      issues.push({
+        type: 'code',
+        severity: 'warning',
+        ruleId: 'room.living_min_width',
+        nodeId: slab.id,
+        message: `Living room short side is ${shortSide.toFixed(2)}m; target at least ${profile.minLivingWidth.toFixed(2)}m.`,
+      })
+    }
+
+    if (roomUses.has('kitchen')) {
+      if (area < profile.minKitchenArea) {
+        issues.push({
+          type: 'code',
+          severity: 'warning',
+          ruleId: 'room.kitchen_min_area',
+          nodeId: slab.id,
+          message: `Kitchen area is ${area.toFixed(1)} sqm; target at least ${profile.minKitchenArea.toFixed(1)} sqm.`,
+        })
+      }
+      if (shortSide < profile.minKitchenWidth) {
+        issues.push({
+          type: 'code',
+          severity: 'warning',
+          ruleId: 'room.kitchen_min_width',
+          nodeId: slab.id,
+          message: `Kitchen short side is ${shortSide.toFixed(2)}m; target at least ${profile.minKitchenWidth.toFixed(2)}m.`,
+        })
+      }
+    }
+
+    if (roomUses.has('bathroom') && area < profile.minBathroomArea) {
+      issues.push({
+        type: 'code',
+        severity: 'warning',
+        ruleId: 'room.bathroom_min_area',
+        nodeId: slab.id,
+        message: `Bathroom area is ${area.toFixed(1)} sqm; target at least ${profile.minBathroomArea.toFixed(1)} sqm.`,
+      })
+    }
+
     if (!isLikelyCorridor && area >= 4 && (doorsBySlab.get(slab.id)?.length ?? 0) === 0) {
       issues.push({
         type: 'code',
@@ -1115,6 +1310,43 @@ function validateBuildingCodeBasics(
         ruleId: 'room.has_door',
         nodeId: slab.id,
         message: `Room/slab ${slab.id} has no associated door/opening. Add a doorway for circulation.`,
+      })
+    }
+  }
+
+  validateWetroomAdjacency(slabs, zonesBySlab, issues, profile)
+}
+
+function validateWetroomAdjacency(
+  slabs: SlabNode[],
+  zonesBySlab: Map<string, ZoneNode[]>,
+  issues: ValidationIssue[],
+  profile: CodeProfile,
+): void {
+  const wetSlabs = slabs.filter((slab) => {
+    const uses = roomUsesForSlab(slab, zonesBySlab)
+    return uses.has('kitchen') || uses.has('bathroom')
+  })
+
+  for (const slab of wetSlabs) {
+    const uses = roomUsesForSlab(slab, zonesBySlab)
+    if (uses.has('kitchen') && wetSlabs.some((other) => other.id !== slab.id && roomUsesForSlab(other, zonesBySlab).has('bathroom'))) {
+      continue
+    }
+    if (uses.has('bathroom') && wetSlabs.some((other) => other.id !== slab.id && roomUsesForSlab(other, zonesBySlab).has('kitchen'))) {
+      continue
+    }
+    const nearest = wetSlabs
+      .filter((other) => other.id !== slab.id)
+      .reduce((best, other) => Math.min(best, minDistanceBetweenPolygons(slab.polygon, other.polygon)), Infinity)
+
+    if (nearest > profile.minWetroomAdjacencyDistance) {
+      issues.push({
+        type: 'info',
+        severity: 'info',
+        ruleId: 'wetroom.adjacency_hint',
+        nodeId: slab.id,
+        message: `Wet room is isolated from other wet rooms; group kitchen/bathroom plumbing when possible.`,
       })
     }
   }
@@ -1175,6 +1407,7 @@ export function validateAndCorrectScene(levelId: string, codeProfile?: string): 
   const walls: WallNode[] = []
   const slabs: SlabNode[] = []
   const items: ItemNode[] = []
+  const zones: ZoneNode[] = []
 
   function isOnLevel(node: AnyNode): boolean {
     if (node.parentId === levelId) return true
@@ -1189,6 +1422,7 @@ export function validateAndCorrectScene(levelId: string, codeProfile?: string): 
     if (node.type === 'wall') walls.push(node as WallNode)
     else if (node.type === 'slab') slabs.push(node as SlabNode)
     else if (node.type === 'item') items.push(node as ItemNode)
+    else if (node.type === 'zone') zones.push(node as ZoneNode)
   }
 
   // Run validations
@@ -1199,10 +1433,10 @@ export function validateAndCorrectScene(levelId: string, codeProfile?: string): 
   detectDoorWindowOverlap(walls, nodes, issues)
   validateFurnitureCollision(items, issues)
   validatePhysicsAndStructure(items, slabs, walls, nodes, issues)
-  validateArchitectureDesign(items, slabs, walls, nodes, issues, profile)
-  checkCirculationAndSafety(levelId, walls, slabs, items, nodes, issues, profile)
+  validateArchitectureDesign(items, slabs, walls, zones, nodes, issues, profile)
+  checkCirculationAndSafety(levelId, walls, slabs, items, zones, nodes, issues, profile)
   detectSlabOverlaps(slabs, issues)
-  validateBuildingCodeBasics(walls, slabs, nodes, issues, profile)
+  validateBuildingCodeBasics(walls, slabs, zones, nodes, issues, profile)
 
   const fixedCount = issues.filter((i) => i.severity === 'fixed').length
   const warningCount = issues.filter((i) => i.severity === 'warning').length

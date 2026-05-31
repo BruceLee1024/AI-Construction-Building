@@ -1,0 +1,27 @@
+{
+  "name": "china-negative-bathroom-size-ventilation",
+  "description": "A small bathroom without windows should report bathroom area and ventilation rule IDs.",
+  "validationArgs": { "codeProfile": "china_residential" },
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": {
+        "origin": [0, 0],
+        "width": 1.4,
+        "depth": 1.6,
+        "addDoor": true,
+        "addWindows": false
+      }
+    },
+    {
+      "tool": "create_zone",
+      "args": {
+        "name": "卫生间",
+        "polygon": [[0.1, 0.1], [1.3, 0.1], [1.3, 1.5], [0.1, 1.5]]
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "validation", "valid": false, "blocking": true, "codeProfile": "china_residential", "mustIncludeRuleIds": ["room.bathroom_min_area", "room.bathroom_ventilation"] }
+  ]
+}

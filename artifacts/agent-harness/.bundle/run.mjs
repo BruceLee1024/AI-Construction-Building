@@ -16761,7 +16761,47 @@ var CODE_PROFILES = {
     minDaylightRatio: 0.08,
     minWindowSillHeight: 0.15,
     minDoorClearance: 0.5,
-    minUsableArea: 2
+    minUsableArea: 2,
+    minBedroomArea: 6,
+    minBedroomWidth: 2.1,
+    minLivingArea: 10,
+    minLivingWidth: 2.7,
+    minKitchenArea: 3.5,
+    minKitchenWidth: 1.5,
+    minBathroomArea: 2,
+    minEntryClearWidth: 1,
+    minFurnitureClearPath: 0.6,
+    minOpeningEdgeClearance: 0.2,
+    minOpeningSpacing: 0.2,
+    minFallProtectionSillHeight: 0.75,
+    minWetroomAdjacencyDistance: 1.2
+  },
+  china_residential: {
+    name: "china_residential",
+    snapThreshold: 0.05,
+    furnitureMargin: 0.1,
+    openingMargin: 0.05,
+    minDoorClearWidth: 0.8,
+    minCorridorWidth: 1.1,
+    minRoomWidth: 1.8,
+    maxRoomAspectRatio: 3,
+    minDaylightRatio: 0.1,
+    minWindowSillHeight: 0.15,
+    minDoorClearance: 0.5,
+    minUsableArea: 2,
+    minBedroomArea: 7,
+    minBedroomWidth: 2.4,
+    minLivingArea: 12,
+    minLivingWidth: 3,
+    minKitchenArea: 4,
+    minKitchenWidth: 1.5,
+    minBathroomArea: 2.5,
+    minEntryClearWidth: 1.1,
+    minFurnitureClearPath: 0.65,
+    minOpeningEdgeClearance: 0.25,
+    minOpeningSpacing: 0.25,
+    minFallProtectionSillHeight: 0.9,
+    minWetroomAdjacencyDistance: 1.2
   }
 };
 function resolveCodeProfile(codeProfile) {
@@ -17014,6 +17054,16 @@ function polygonBounds(poly) {
     depth: maxZ - minZ
   };
 }
+function polygonsIntersect(a, b) {
+  if (a.length < 3 || b.length < 3) return false;
+  for (const pt of a) {
+    if (pointInPolygon(pt[0], pt[1], b)) return true;
+  }
+  for (const pt of b) {
+    if (pointInPolygon(pt[0], pt[1], a)) return true;
+  }
+  return false;
+}
 function pointToSegmentDistance(point, start, end) {
   const dx = end[0] - start[0];
   const dz = end[1] - start[1];
@@ -17024,6 +17074,77 @@ function pointToSegmentDistance(point, start, end) {
     Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dz) / lenSq)
   );
   return dist2D(point, [start[0] + t * dx, start[1] + t * dz]);
+}
+function inferRoomUse(name, metadata) {
+  if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+    const roomType = metadata.roomType;
+    if (typeof roomType === "string") {
+      const normalized2 = normalizeRoomUse(roomType);
+      if (normalized2) return normalized2;
+    }
+  }
+  const normalized = normalizeRoomUse(name ?? "");
+  return normalized ?? "other";
+}
+function normalizeRoomUse(value) {
+  const lower = value.toLowerCase();
+  if (/卧|bed|master|kids|guest/.test(lower)) return "bedroom";
+  if (/客|起居|living|lounge/.test(lower)) return "living";
+  if (/厨|kitchen/.test(lower)) return "kitchen";
+  if (/卫|浴|厕|bath|toilet|washroom/.test(lower)) return "bathroom";
+  if (/餐|dining/.test(lower)) return "dining";
+  if (/阳台|balcony/.test(lower)) return "balcony";
+  if (/走廊|过道|hall|corridor/.test(lower)) return "corridor";
+  if (/玄关|entry|foyer/.test(lower)) return "entry";
+  return null;
+}
+function collectZonesBySlab(slabs, zones) {
+  const result = /* @__PURE__ */ new Map();
+  for (const slab of slabs) result.set(slab.id, []);
+  for (const slab of slabs) {
+    if (slab.polygon.length < 3) continue;
+    const slabCentroid = polygonCentroid(slab.polygon);
+    for (const zone of zones) {
+      if (zone.polygon.length < 3) continue;
+      const zoneCentroid = polygonCentroid(zone.polygon);
+      if (pointInPolygon(zoneCentroid[0], zoneCentroid[1], slab.polygon) || pointInPolygon(slabCentroid[0], slabCentroid[1], zone.polygon) || polygonsIntersect(slab.polygon, zone.polygon)) {
+        result.get(slab.id)?.push(zone);
+      }
+    }
+  }
+  return result;
+}
+function roomUsesForSlab(slab, zonesBySlab) {
+  const uses = /* @__PURE__ */ new Set();
+  for (const zone of zonesBySlab.get(slab.id) ?? []) {
+    uses.add(inferRoomUse(zone.name, zone.metadata));
+  }
+  return uses;
+}
+function hasVentilationStrategy(use, windows, items) {
+  if (windows.length > 0) return true;
+  if (use === "kitchen") {
+    return items.some((item) => item.asset.category === "kitchen" && /hood|exhaust|vent/i.test(`${item.asset.id} ${item.asset.name}`));
+  }
+  if (use === "bathroom") {
+    return items.some((item) => /fan|exhaust|vent|dryer/i.test(`${item.asset.id} ${item.asset.name}`));
+  }
+  return false;
+}
+function minDistanceBetweenPolygons(a, b) {
+  if (polygonsIntersect(a, b)) return 0;
+  let best = Infinity;
+  for (let i = 0; i < a.length; i++) {
+    const a0 = a[i];
+    const a1 = a[(i + 1) % a.length];
+    for (const pt of b) best = Math.min(best, pointToSegmentDistance(pt, a0, a1));
+  }
+  for (let i = 0; i < b.length; i++) {
+    const b0 = b[i];
+    const b1 = b[(i + 1) % b.length];
+    for (const pt of a) best = Math.min(best, pointToSegmentDistance(pt, b0, b1));
+  }
+  return best;
 }
 function slabTouchesExterior(slab, walls) {
   if (slab.polygon.length < 3) return false;
@@ -17234,8 +17355,9 @@ function validatePhysicsAndStructure(items, slabs, walls, nodes, issues) {
     }
   }
 }
-function validateArchitectureDesign(items, slabs, walls, nodes, issues, profile) {
+function validateArchitectureDesign(items, slabs, walls, zones, nodes, issues, profile) {
   const windowsBySlab = collectWindowsBySlab(slabs, walls, nodes);
+  const zonesBySlab = collectZonesBySlab(slabs, zones);
   for (const slab of slabs) {
     if (slab.polygon.length < 3) continue;
     const bounds = polygonBounds(slab.polygon);
@@ -17247,6 +17369,8 @@ function validateArchitectureDesign(items, slabs, walls, nodes, issues, profile)
     const longSide = Math.max(bounds.width, bounds.depth);
     const aspectRatio = shortSide > 0 ? longSide / shortSide : Infinity;
     const isLikelyCorridor = longSide >= 3 && shortSide <= 1.6;
+    const roomUses = roomUsesForSlab(slab, zonesBySlab);
+    const isMainSpace = roomUses.has("bedroom") || roomUses.has("living") || roomUses.has("dining");
     if (area >= 8 && windows.length === 0) {
       issues.push({
         type: "code",
@@ -17262,6 +17386,33 @@ function validateArchitectureDesign(items, slabs, walls, nodes, issues, profile)
         ruleId: "room.daylight_ratio",
         nodeId: slab.id,
         message: `Room/slab ${slab.id} daylight ratio is low (${(daylightRatio * 100).toFixed(1)}%). Add or enlarge windows.`
+      });
+    }
+    if (isMainSpace && area >= 6 && daylightRatio < profile.minDaylightRatio) {
+      issues.push({
+        type: "code",
+        severity: "warning",
+        ruleId: "room.main_space_daylight",
+        nodeId: slab.id,
+        message: `Main residential space daylight ratio is ${(daylightRatio * 100).toFixed(1)}%; target at least ${(profile.minDaylightRatio * 100).toFixed(0)}%.`
+      });
+    }
+    if (roomUses.has("kitchen") && !hasVentilationStrategy("kitchen", windows, items)) {
+      issues.push({
+        type: "code",
+        severity: "warning",
+        ruleId: "room.kitchen_ventilation",
+        nodeId: slab.id,
+        message: `Kitchen zone has no exterior window or modeled mechanical ventilation strategy.`
+      });
+    }
+    if (roomUses.has("bathroom") && !hasVentilationStrategy("bathroom", windows, items)) {
+      issues.push({
+        type: "code",
+        severity: "warning",
+        ruleId: "room.bathroom_ventilation",
+        nodeId: slab.id,
+        message: `Bathroom zone has no exterior window or modeled mechanical ventilation strategy.`
       });
     }
     if (!isLikelyCorridor && area >= 4 && shortSide < profile.minRoomWidth) {
@@ -17293,7 +17444,7 @@ function validateArchitectureDesign(items, slabs, walls, nodes, issues, profile)
     }
   }
 }
-function checkCirculationAndSafety(levelId, walls, slabs, items, nodes, issues, profile) {
+function checkCirculationAndSafety(levelId, walls, slabs, items, zones, nodes, issues, profile) {
   const levelNode = nodes[levelId];
   const isGroundLevel = levelNode && levelNode.type === "level" && levelNode.level === 0;
   const doorInfos = [];
@@ -17330,6 +17481,7 @@ function checkCirculationAndSafety(levelId, walls, slabs, items, nodes, issues, 
       const dist = dist2D([door.worldX, door.worldZ], [item.position[0], item.position[2]]);
       const dim = getScaledDimensions(item);
       const itemRadius2 = Math.max(dim[0], dim[2]) / 2;
+      const clearance = dist - door.width / 2 - itemRadius2;
       const requiredClearance = door.width / 2 + profile.minDoorClearance + itemRadius2;
       if (dist < requiredClearance) {
         issues.push({
@@ -17340,6 +17492,31 @@ function checkCirculationAndSafety(levelId, walls, slabs, items, nodes, issues, 
           message: `Furniture "${item.asset.name}" is blocking the door (clearance < ${profile.minDoorClearance.toFixed(1)}m).`
         });
       }
+      if (clearance < profile.minFurnitureClearPath) {
+        issues.push({
+          type: "overlap",
+          severity: "warning",
+          ruleId: "circulation.furniture_clear_path",
+          nodeId: item.id,
+          message: `Furniture "${item.asset.name}" leaves only ${clearance.toFixed(2)}m clear circulation near a doorway.`
+        });
+      }
+    }
+  }
+  const zonesBySlab = collectZonesBySlab(slabs, zones);
+  for (const slab of slabs) {
+    if (slab.polygon.length < 3) continue;
+    const uses = roomUsesForSlab(slab, zonesBySlab);
+    const bounds = polygonBounds(slab.polygon);
+    const shortSide = Math.min(bounds.width, bounds.depth);
+    if ((uses.has("entry") || uses.has("corridor")) && shortSide < profile.minEntryClearWidth) {
+      issues.push({
+        type: "code",
+        severity: "warning",
+        ruleId: "circulation.entry_clear_width",
+        nodeId: slab.id,
+        message: `Entry/circulation clear width is ${shortSide.toFixed(2)}m; target at least ${profile.minEntryClearWidth.toFixed(2)}m.`
+      });
     }
   }
   if (!isGroundLevel) {
@@ -17366,16 +17543,21 @@ function checkCirculationAndSafety(levelId, walls, slabs, items, nodes, issues, 
     }
   }
 }
-function validateBuildingCodeBasics(walls, slabs, nodes, issues, profile) {
+function validateBuildingCodeBasics(walls, slabs, zones, nodes, issues, profile) {
   const doorsBySlab = collectDoorsBySlab(slabs, walls, nodes);
+  const zonesBySlab = collectZonesBySlab(slabs, zones);
   for (const wall of walls) {
     const wallLen = wallLength(wall);
+    const openings = [];
     for (const childId of wall.children) {
       const child = nodes[childId];
       if (!child) continue;
       if (child.type === "door") {
         const door = child;
         const doorWidth = door.width ?? 0.9;
+        const minX = door.position[0] - doorWidth / 2;
+        const maxX = door.position[0] + doorWidth / 2;
+        openings.push({ id: door.id, minX, maxX });
         if (doorWidth < profile.minDoorClearWidth) {
           issues.push({
             type: "code",
@@ -17394,12 +17576,34 @@ function validateBuildingCodeBasics(walls, slabs, nodes, issues, profile) {
             message: `Door consumes too much of a short wall (${doorWidth.toFixed(2)}m door on ${wallLen.toFixed(2)}m wall).`
           });
         }
+        if (minX < profile.minOpeningEdgeClearance || wallLen - maxX < profile.minOpeningEdgeClearance) {
+          issues.push({
+            type: "code",
+            severity: "warning",
+            ruleId: "opening.edge_clearance",
+            nodeId: door.id,
+            message: `Door is too close to a wall end; keep at least ${profile.minOpeningEdgeClearance.toFixed(2)}m edge clearance.`
+          });
+        }
       }
       if (child.type === "window") {
         const win = child;
+        const winWidth = win.width ?? 1.5;
+        const minX = win.position[0] - winWidth / 2;
+        const maxX = win.position[0] + winWidth / 2;
+        openings.push({ id: win.id, minX, maxX });
         const sillCenter = win.position[1];
         const winHeight = win.height ?? 1.5;
         const sillBottom = sillCenter - winHeight / 2;
+        if (minX < profile.minOpeningEdgeClearance || wallLen - maxX < profile.minOpeningEdgeClearance) {
+          issues.push({
+            type: "code",
+            severity: "warning",
+            ruleId: "opening.edge_clearance",
+            nodeId: win.id,
+            message: `Window is too close to a wall end; keep at least ${profile.minOpeningEdgeClearance.toFixed(2)}m edge clearance.`
+          });
+        }
         if (sillBottom < profile.minWindowSillHeight) {
           issues.push({
             type: "code",
@@ -17409,6 +17613,30 @@ function validateBuildingCodeBasics(walls, slabs, nodes, issues, profile) {
             message: `Window sill is low (${sillBottom.toFixed(2)}m). Check fall protection or raise sill height.`
           });
         }
+        if (sillBottom + 1e-6 < profile.minFallProtectionSillHeight) {
+          issues.push({
+            type: "code",
+            severity: "warning",
+            ruleId: "window.fall_protection",
+            nodeId: win.id,
+            message: `Window sill bottom is ${sillBottom.toFixed(2)}m; add fall protection or raise to ${profile.minFallProtectionSillHeight.toFixed(2)}m.`
+          });
+        }
+      }
+    }
+    openings.sort((a, b) => a.minX - b.minX);
+    for (let i = 1; i < openings.length; i++) {
+      const prev = openings[i - 1];
+      const current = openings[i];
+      const spacing = current.minX - prev.maxX;
+      if (spacing >= 0 && spacing < profile.minOpeningSpacing) {
+        issues.push({
+          type: "code",
+          severity: "warning",
+          ruleId: "opening.min_spacing",
+          nodeId: current.id,
+          message: `Adjacent openings are only ${spacing.toFixed(2)}m apart; keep at least ${profile.minOpeningSpacing.toFixed(2)}m between openings.`
+        });
       }
     }
   }
@@ -17419,6 +17647,7 @@ function validateBuildingCodeBasics(walls, slabs, nodes, issues, profile) {
     const longSide = Math.max(bounds.width, bounds.depth);
     const area = polygonArea(slab.polygon);
     const isLikelyCorridor = longSide >= 3 && shortSide <= 1.6;
+    const roomUses = roomUsesForSlab(slab, zonesBySlab);
     if (isLikelyCorridor && shortSide < profile.minCorridorWidth) {
       issues.push({
         type: "code",
@@ -17437,6 +17666,73 @@ function validateBuildingCodeBasics(walls, slabs, nodes, issues, profile) {
         message: `Room/slab area is only ${area.toFixed(1)} sqm, which is too small for a usable enclosed space.`
       });
     }
+    if (roomUses.has("bedroom")) {
+      if (area < profile.minBedroomArea) {
+        issues.push({
+          type: "code",
+          severity: "warning",
+          ruleId: "room.bedroom_min_area",
+          nodeId: slab.id,
+          message: `Bedroom area is ${area.toFixed(1)} sqm; target at least ${profile.minBedroomArea.toFixed(1)} sqm.`
+        });
+      }
+      if (shortSide < profile.minBedroomWidth) {
+        issues.push({
+          type: "code",
+          severity: "warning",
+          ruleId: "room.bedroom_min_width",
+          nodeId: slab.id,
+          message: `Bedroom short side is ${shortSide.toFixed(2)}m; target at least ${profile.minBedroomWidth.toFixed(2)}m.`
+        });
+      }
+    }
+    if (roomUses.has("living") && area < profile.minLivingArea) {
+      issues.push({
+        type: "code",
+        severity: "warning",
+        ruleId: "room.living_min_area",
+        nodeId: slab.id,
+        message: `Living room area is ${area.toFixed(1)} sqm; target at least ${profile.minLivingArea.toFixed(1)} sqm.`
+      });
+    }
+    if (roomUses.has("living") && shortSide < profile.minLivingWidth) {
+      issues.push({
+        type: "code",
+        severity: "warning",
+        ruleId: "room.living_min_width",
+        nodeId: slab.id,
+        message: `Living room short side is ${shortSide.toFixed(2)}m; target at least ${profile.minLivingWidth.toFixed(2)}m.`
+      });
+    }
+    if (roomUses.has("kitchen")) {
+      if (area < profile.minKitchenArea) {
+        issues.push({
+          type: "code",
+          severity: "warning",
+          ruleId: "room.kitchen_min_area",
+          nodeId: slab.id,
+          message: `Kitchen area is ${area.toFixed(1)} sqm; target at least ${profile.minKitchenArea.toFixed(1)} sqm.`
+        });
+      }
+      if (shortSide < profile.minKitchenWidth) {
+        issues.push({
+          type: "code",
+          severity: "warning",
+          ruleId: "room.kitchen_min_width",
+          nodeId: slab.id,
+          message: `Kitchen short side is ${shortSide.toFixed(2)}m; target at least ${profile.minKitchenWidth.toFixed(2)}m.`
+        });
+      }
+    }
+    if (roomUses.has("bathroom") && area < profile.minBathroomArea) {
+      issues.push({
+        type: "code",
+        severity: "warning",
+        ruleId: "room.bathroom_min_area",
+        nodeId: slab.id,
+        message: `Bathroom area is ${area.toFixed(1)} sqm; target at least ${profile.minBathroomArea.toFixed(1)} sqm.`
+      });
+    }
     if (!isLikelyCorridor && area >= 4 && (doorsBySlab.get(slab.id)?.length ?? 0) === 0) {
       issues.push({
         type: "code",
@@ -17444,6 +17740,32 @@ function validateBuildingCodeBasics(walls, slabs, nodes, issues, profile) {
         ruleId: "room.has_door",
         nodeId: slab.id,
         message: `Room/slab ${slab.id} has no associated door/opening. Add a doorway for circulation.`
+      });
+    }
+  }
+  validateWetroomAdjacency(slabs, zonesBySlab, issues, profile);
+}
+function validateWetroomAdjacency(slabs, zonesBySlab, issues, profile) {
+  const wetSlabs = slabs.filter((slab) => {
+    const uses = roomUsesForSlab(slab, zonesBySlab);
+    return uses.has("kitchen") || uses.has("bathroom");
+  });
+  for (const slab of wetSlabs) {
+    const uses = roomUsesForSlab(slab, zonesBySlab);
+    if (uses.has("kitchen") && wetSlabs.some((other) => other.id !== slab.id && roomUsesForSlab(other, zonesBySlab).has("bathroom"))) {
+      continue;
+    }
+    if (uses.has("bathroom") && wetSlabs.some((other) => other.id !== slab.id && roomUsesForSlab(other, zonesBySlab).has("kitchen"))) {
+      continue;
+    }
+    const nearest = wetSlabs.filter((other) => other.id !== slab.id).reduce((best, other) => Math.min(best, minDistanceBetweenPolygons(slab.polygon, other.polygon)), Infinity);
+    if (nearest > profile.minWetroomAdjacencyDistance) {
+      issues.push({
+        type: "info",
+        severity: "info",
+        ruleId: "wetroom.adjacency_hint",
+        nodeId: slab.id,
+        message: `Wet room is isolated from other wet rooms; group kitchen/bathroom plumbing when possible.`
       });
     }
   }
@@ -17488,6 +17810,7 @@ function validateAndCorrectScene(levelId, codeProfile) {
   const walls = [];
   const slabs = [];
   const items = [];
+  const zones = [];
   function isOnLevel(node) {
     if (node.parentId === levelId) return true;
     if (!node.parentId) return false;
@@ -17499,6 +17822,7 @@ function validateAndCorrectScene(levelId, codeProfile) {
     if (node.type === "wall") walls.push(node);
     else if (node.type === "slab") slabs.push(node);
     else if (node.type === "item") items.push(node);
+    else if (node.type === "zone") zones.push(node);
   }
   snapWallEndpoints(walls, issues, profile);
   validateDoorWindowFit(walls, nodes, issues, profile);
@@ -17507,10 +17831,10 @@ function validateAndCorrectScene(levelId, codeProfile) {
   detectDoorWindowOverlap(walls, nodes, issues);
   validateFurnitureCollision(items, issues);
   validatePhysicsAndStructure(items, slabs, walls, nodes, issues);
-  validateArchitectureDesign(items, slabs, walls, nodes, issues, profile);
-  checkCirculationAndSafety(levelId, walls, slabs, items, nodes, issues, profile);
+  validateArchitectureDesign(items, slabs, walls, zones, nodes, issues, profile);
+  checkCirculationAndSafety(levelId, walls, slabs, items, zones, nodes, issues, profile);
   detectSlabOverlaps(slabs, issues);
-  validateBuildingCodeBasics(walls, slabs, nodes, issues, profile);
+  validateBuildingCodeBasics(walls, slabs, zones, nodes, issues, profile);
   const fixedCount = issues.filter((i) => i.severity === "fixed").length;
   const warningCount = issues.filter((i) => i.severity === "warning").length;
   const blockingCount = issues.filter((i) => i.severity === "warning" && (i.type === "code" || i.type === "bounds" || i.type === "gap" || i.type === "overlap")).length;
@@ -17953,12 +18277,19 @@ function createZone(args) {
   const name = args.name;
   const polygon = args.polygon;
   const color = args.color ?? "#3b82f6";
-  const zone = ZoneNode.parse({ name, polygon, color });
+  const roomType = args.roomType;
+  const zone = ZoneNode.parse({
+    name,
+    polygon,
+    color,
+    ...roomType ? { metadata: { roomType } } : {}
+  });
   use_scene_default.getState().createNode(zone, levelId);
   return JSON.stringify({
     success: true,
     zoneId: zone.id,
-    name
+    name,
+    ...roomType ? { roomType } : {}
   });
 }
 function createRoof(args) {
@@ -18028,6 +18359,7 @@ function createApartment(args) {
     const zoneResult = JSON.parse(
       createZone({
         name: room.name,
+        roomType: room.roomType,
         polygon: [
           [curX + t, curZ + t],
           [curX + room.width - t, curZ + t],
@@ -18515,6 +18847,7 @@ function createPolygonRoom(args) {
   const addSlab = args.addSlab ?? true;
   const zoneName = args.zoneName;
   const zoneColor = args.zoneColor ?? "#3b82f6";
+  const zoneRoomType = args.zoneRoomType;
   const wallDefs = polygon.map((pt, i) => {
     const next = polygon[(i + 1) % polygon.length];
     return {
@@ -18541,7 +18874,7 @@ function createPolygonRoom(args) {
   }
   if (zoneName) {
     const zoneResult = JSON.parse(
-      createZone({ name: zoneName, polygon, color: zoneColor })
+      createZone({ name: zoneName, polygon, color: zoneColor, roomType: zoneRoomType })
     );
     results.zone = zoneResult;
   }
@@ -19886,6 +20219,7 @@ For complex requests:
 7. **Final response**: Summarize what was created and mention any remaining warnings.
 
 Never call multiple scene-modifying tools in the same assistant turn for complex generation. If the tool result says a modification was deferred, do not repeat the same deferred tool immediately; switch to the requested nextAction and use smaller phase tools.
+For Chinese residential requests, validate with \`codeProfile: "china_residential"\` before moving from layout/openings to furniture, roof, or decoration. For all other requests, the default validation profile is acceptable unless the user asks for a specific profile.
 
 ### Runtime Guardrails
 
@@ -20023,6 +20357,12 @@ These checks are simplified modeling guardrails, not a stamped code review. Stil
 | Daylight / ventilation | Living rooms, bedrooms, kitchens, baths should have exterior windows or ventilation strategy |
 | Upper-floor exterior doors | Must open to balcony/slab/stair landing, never directly to void |
 | Door clearance | Keep at least about 0.50 m clear in front of doors; do not block with furniture |
+| China residential bedroom | Target \u2265 7 m\xB2 and short side \u2265 2.40 m |
+| China residential living room | Target \u2265 12 m\xB2 and short side \u2265 3.00 m |
+| China residential kitchen | Target \u2265 4 m\xB2, short side \u2265 1.50 m, with window or ventilation |
+| China residential bathroom | Target \u2265 2.5 m\xB2, with window or ventilation |
+| Entry/circulation clear path | Target \u2265 1.10 m; keep furniture out of door/circulation paths |
+| Opening placement | Keep doors/windows away from wall ends and avoid tightly packed openings |
 
 If a user asks for a layout that conflicts with these targets, explain the assumption and adjust conservatively.
 
@@ -20558,6 +20898,11 @@ var agentTools = [
           color: {
             type: "string",
             description: 'Hex color for the zone (default: "#3b82f6" blue)'
+          },
+          roomType: {
+            type: "string",
+            enum: ["bedroom", "living", "kitchen", "bathroom", "dining", "balcony", "corridor", "entry", "other"],
+            description: "Optional semantic room type for building-rule validation. If omitted, validators infer it from the zone name."
           }
         },
         required: ["name", "polygon"]
@@ -20652,6 +20997,11 @@ var agentTools = [
                 hasWindow: {
                   type: "boolean",
                   description: "Whether this room has windows (default: false)"
+                },
+                roomType: {
+                  type: "string",
+                  enum: ["bedroom", "living", "kitchen", "bathroom", "dining", "balcony", "corridor", "entry", "other"],
+                  description: "Optional semantic room type stored on the room zone for building-rule validation."
                 }
               },
               required: ["name", "width", "depth"]
@@ -20747,13 +21097,7 @@ var agentTools = [
       description: "Delete all walls, slabs, doors, windows, ceilings, zones, and roofs on the current level. Useful for starting over.",
       parameters: {
         type: "object",
-        properties: {
-          codeProfile: {
-            type: "string",
-            enum: ["residential_default"],
-            description: "Optional building-rule profile. Defaults to residential_default, a conservative residential modeling guardrail profile."
-          }
-        },
+        properties: {},
         required: []
       }
     }
@@ -20777,7 +21121,13 @@ var agentTools = [
       description: "Undo the last scene change. Can be called multiple times to undo multiple steps.",
       parameters: {
         type: "object",
-        properties: {},
+        properties: {
+          codeProfile: {
+            type: "string",
+            enum: ["residential_default", "china_residential"],
+            description: "Optional building-rule profile. Defaults to residential_default; use china_residential for Chinese residential layouts."
+          }
+        },
         required: []
       }
     }
@@ -20982,6 +21332,11 @@ var agentTools = [
           zoneColor: {
             type: "string",
             description: 'Hex color for the zone (default: "#3b82f6")'
+          },
+          zoneRoomType: {
+            type: "string",
+            enum: ["bedroom", "living", "kitchen", "bathroom", "dining", "balcony", "corridor", "entry", "other"],
+            description: "Optional semantic room type stored on the generated zone for building-rule validation."
           }
         },
         required: ["polygon"]
@@ -22098,6 +22453,9 @@ function assertHarnessCase(value, filePath) {
   if (!Array.isArray(value.assertions) || value.assertions.length === 0) {
     throw new Error(`${filePath}: assertions must be a non-empty array`);
   }
+  if (value.validationArgs != null && !isRecord(value.validationArgs)) {
+    throw new Error(`${filePath}: validationArgs must be an object when provided`);
+  }
   value.steps.forEach((step, index) => {
     if (!isRecord(step)) throw new Error(`${filePath}: steps[${index}] must be an object`);
     if (typeof step.tool !== "string" || step.tool.trim() === "") {
@@ -22247,7 +22605,7 @@ async function runCase(testCase, verbose) {
       stepResults.push({ index, tool: step.tool, args, raw, parsed });
       if (verbose) console.log(`  step ${index}: ${step.tool} -> ${summarizeResult(parsed)}`);
     }
-    validation = parseToolResult(executeToolCall("validate_scene", {}));
+    validation = parseToolResult(executeToolCall("validate_scene", testCase.validationArgs ?? {}));
     for (const assertion of testCase.assertions) {
       assertions.push(evaluateAssertion(assertion, stepResults, validation));
     }

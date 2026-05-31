@@ -1,0 +1,27 @@
+{
+  "name": "china-negative-bedroom-size",
+  "description": "A bedroom below china_residential area and width targets should be blocking.",
+  "validationArgs": { "codeProfile": "china_residential" },
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": {
+        "origin": [0, 0],
+        "width": 2.2,
+        "depth": 2.5,
+        "addDoor": true,
+        "addWindows": true
+      }
+    },
+    {
+      "tool": "create_zone",
+      "args": {
+        "name": "卧室",
+        "polygon": [[0.1, 0.1], [2.1, 0.1], [2.1, 2.4], [0.1, 2.4]]
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "validation", "valid": false, "blocking": true, "codeProfile": "china_residential", "mustIncludeRuleIds": ["room.bedroom_min_area", "room.bedroom_min_width"] }
+  ]
+}

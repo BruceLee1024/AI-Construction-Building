@@ -474,14 +474,21 @@ function createZone(args: Record<string, unknown>): string {
   const name = args.name as string
   const polygon = args.polygon as [number, number][]
   const color = (args.color as string) ?? '#3b82f6'
+  const roomType = args.roomType as string | undefined
 
-  const zone = ZoneNode.parse({ name, polygon, color })
+  const zone = ZoneNode.parse({
+    name,
+    polygon,
+    color,
+    ...(roomType ? { metadata: { roomType } } : {}),
+  })
   useScene.getState().createNode(zone, levelId as AnyNodeId)
 
   return JSON.stringify({
     success: true,
     zoneId: zone.id,
     name,
+    ...(roomType ? { roomType } : {}),
   })
 }
 
@@ -537,6 +544,7 @@ function createApartment(args: Record<string, unknown>): string {
     depth: number
     hasDoor?: boolean
     hasWindow?: boolean
+    roomType?: string
   }>
   const wallHeight = args.wallHeight as number | undefined
   const wallThickness = (args.wallThickness as number) ?? 0.15
@@ -573,6 +581,7 @@ function createApartment(args: Record<string, unknown>): string {
     const zoneResult = JSON.parse(
       createZone({
         name: room.name,
+        roomType: room.roomType,
         polygon: [
           [curX + t, curZ + t],
           [curX + room.width - t, curZ + t],
@@ -1167,6 +1176,7 @@ function createPolygonRoom(args: Record<string, unknown>): string {
   const addSlab = (args.addSlab as boolean) ?? true
   const zoneName = args.zoneName as string | undefined
   const zoneColor = (args.zoneColor as string) ?? '#3b82f6'
+  const zoneRoomType = args.zoneRoomType as string | undefined
 
   // Create walls along polygon edges
   const wallDefs = polygon.map((pt, i) => {
@@ -1203,7 +1213,7 @@ function createPolygonRoom(args: Record<string, unknown>): string {
   // Create zone if name provided
   if (zoneName) {
     const zoneResult = JSON.parse(
-      createZone({ name: zoneName, polygon, color: zoneColor }),
+      createZone({ name: zoneName, polygon, color: zoneColor, roomType: zoneRoomType }),
     )
     results.zone = zoneResult
   }

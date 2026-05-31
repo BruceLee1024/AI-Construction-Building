@@ -256,6 +256,12 @@ export const agentTools: ChatCompletionTool[] = [
             type: 'string',
             description: 'Hex color for the zone (default: "#3b82f6" blue)',
           },
+          roomType: {
+            type: 'string',
+            enum: ['bedroom', 'living', 'kitchen', 'bathroom', 'dining', 'balcony', 'corridor', 'entry', 'other'],
+            description:
+              'Optional semantic room type for building-rule validation. If omitted, validators infer it from the zone name.',
+          },
         },
         required: ['name', 'polygon'],
       },
@@ -351,6 +357,12 @@ export const agentTools: ChatCompletionTool[] = [
                 hasWindow: {
                   type: 'boolean',
                   description: 'Whether this room has windows (default: false)',
+                },
+                roomType: {
+                  type: 'string',
+                  enum: ['bedroom', 'living', 'kitchen', 'bathroom', 'dining', 'balcony', 'corridor', 'entry', 'other'],
+                  description:
+                    'Optional semantic room type stored on the room zone for building-rule validation.',
                 },
               },
               required: ['name', 'width', 'depth'],
@@ -449,14 +461,7 @@ export const agentTools: ChatCompletionTool[] = [
       description: 'Delete all walls, slabs, doors, windows, ceilings, zones, and roofs on the current level. Useful for starting over.',
       parameters: {
         type: 'object',
-        properties: {
-          codeProfile: {
-            type: 'string',
-            enum: ['residential_default'],
-            description:
-              'Optional building-rule profile. Defaults to residential_default, a conservative residential modeling guardrail profile.',
-          },
-        },
+        properties: {},
         required: [],
       },
     },
@@ -481,7 +486,14 @@ export const agentTools: ChatCompletionTool[] = [
       description: 'Undo the last scene change. Can be called multiple times to undo multiple steps.',
       parameters: {
         type: 'object',
-        properties: {},
+        properties: {
+          codeProfile: {
+            type: 'string',
+            enum: ['residential_default', 'china_residential'],
+            description:
+              'Optional building-rule profile. Defaults to residential_default; use china_residential for Chinese residential layouts.',
+          },
+        },
         required: [],
       },
     },
@@ -693,6 +705,12 @@ export const agentTools: ChatCompletionTool[] = [
           zoneColor: {
             type: 'string',
             description: 'Hex color for the zone (default: "#3b82f6")',
+          },
+          zoneRoomType: {
+            type: 'string',
+            enum: ['bedroom', 'living', 'kitchen', 'bathroom', 'dining', 'balcony', 'corridor', 'entry', 'other'],
+            description:
+              'Optional semantic room type stored on the generated zone for building-rule validation.',
           },
         },
         required: ['polygon'],

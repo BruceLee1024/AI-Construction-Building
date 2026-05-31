@@ -1,0 +1,122 @@
+{
+  "name": "china-residential-compliant",
+  "description": "A small Chinese residential layout with semantic zones should pass the china_residential guardrails.",
+  "validationArgs": { "codeProfile": "china_residential" },
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": {
+        "origin": [0, 0],
+        "width": 4,
+        "depth": 4,
+        "addDoor": true,
+        "doorWall": "front",
+        "addWindows": false
+      }
+    },
+    {
+      "tool": "create_window",
+      "args": {
+        "wallIndex": 2,
+        "width": 1.5,
+        "position_t": 0.5,
+        "sillHeight": 1
+      }
+    },
+    {
+      "tool": "create_zone",
+      "args": {
+        "name": "客厅",
+        "roomType": "living",
+        "polygon": [[0.1, 0.1], [3.9, 0.1], [3.9, 3.9], [0.1, 3.9]]
+      }
+    },
+    {
+      "tool": "create_room",
+      "args": {
+        "origin": [5, 0],
+        "width": 3.2,
+        "depth": 2.6,
+        "addDoor": true,
+        "doorWall": "front",
+        "addWindows": false
+      }
+    },
+    {
+      "tool": "create_window",
+      "args": {
+        "wallIndex": 2,
+        "width": 1.2,
+        "position_t": 0.5,
+        "sillHeight": 1
+      }
+    },
+    {
+      "tool": "create_zone",
+      "args": {
+        "name": "卧室",
+        "roomType": "bedroom",
+        "polygon": [[5.1, 0.1], [8.1, 0.1], [8.1, 2.5], [5.1, 2.5]]
+      }
+    },
+    {
+      "tool": "create_room",
+      "args": {
+        "origin": [0, 5],
+        "width": 2.2,
+        "depth": 2.2,
+        "addDoor": true,
+        "doorWall": "front",
+        "addWindows": false
+      }
+    },
+    {
+      "tool": "create_window",
+      "args": {
+        "wallIndex": 2,
+        "width": 1,
+        "position_t": 0.5,
+        "sillHeight": 1
+      }
+    },
+    {
+      "tool": "create_zone",
+      "args": {
+        "name": "厨房",
+        "roomType": "kitchen",
+        "polygon": [[0.1, 5.1], [2.1, 5.1], [2.1, 7.1], [0.1, 7.1]]
+      }
+    },
+    {
+      "tool": "create_room",
+      "args": {
+        "origin": [3, 5],
+        "width": 1.8,
+        "depth": 1.8,
+        "addDoor": true,
+        "doorWall": "front",
+        "addWindows": false
+      }
+    },
+    {
+      "tool": "create_window",
+      "args": {
+        "wallIndex": 2,
+        "width": 0.9,
+        "position_t": 0.5,
+        "sillHeight": 1
+      }
+    },
+    {
+      "tool": "create_zone",
+      "args": {
+        "name": "卫生间",
+        "roomType": "bathroom",
+        "polygon": [[3.1, 5.1], [4.7, 5.1], [4.7, 6.7], [3.1, 6.7]]
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "validation", "valid": true, "blocking": false, "blockingCount": 0, "codeProfile": "china_residential", "mustExcludeRuleIds": ["room.bedroom_min_area", "room.bedroom_min_width", "room.living_min_area", "room.kitchen_min_area", "room.kitchen_min_width", "room.bathroom_min_area", "room.main_space_daylight", "room.kitchen_ventilation", "room.bathroom_ventilation"] }
+  ]
+}

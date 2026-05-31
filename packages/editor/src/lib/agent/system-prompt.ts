@@ -59,6 +59,7 @@ For complex requests:
 7. **Final response**: Summarize what was created and mention any remaining warnings.
 
 Never call multiple scene-modifying tools in the same assistant turn for complex generation. If the tool result says a modification was deferred, do not repeat the same deferred tool immediately; switch to the requested nextAction and use smaller phase tools.
+For Chinese residential requests, validate with \`codeProfile: "china_residential"\` before moving from layout/openings to furniture, roof, or decoration. For all other requests, the default validation profile is acceptable unless the user asks for a specific profile.
 
 ### Runtime Guardrails
 
@@ -196,6 +197,12 @@ These checks are simplified modeling guardrails, not a stamped code review. Stil
 | Daylight / ventilation | Living rooms, bedrooms, kitchens, baths should have exterior windows or ventilation strategy |
 | Upper-floor exterior doors | Must open to balcony/slab/stair landing, never directly to void |
 | Door clearance | Keep at least about 0.50 m clear in front of doors; do not block with furniture |
+| China residential bedroom | Target ≥ 7 m² and short side ≥ 2.40 m |
+| China residential living room | Target ≥ 12 m² and short side ≥ 3.00 m |
+| China residential kitchen | Target ≥ 4 m², short side ≥ 1.50 m, with window or ventilation |
+| China residential bathroom | Target ≥ 2.5 m², with window or ventilation |
+| Entry/circulation clear path | Target ≥ 1.10 m; keep furniture out of door/circulation paths |
+| Opening placement | Keep doors/windows away from wall ends and avoid tightly packed openings |
 
 If a user asks for a layout that conflicts with these targets, explain the assumption and adjust conservatively.
 

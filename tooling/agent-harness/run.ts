@@ -167,7 +167,7 @@ async function runCase(testCase: HarnessCase, verbose: boolean): Promise<CaseRes
       if (verbose) console.log(`  step ${index}: ${step.tool} -> ${summarizeResult(parsed)}`)
     }
 
-    validation = parseToolResult(executeToolCall('validate_scene', {}))
+    validation = parseToolResult(executeToolCall('validate_scene', testCase.validationArgs ?? {}))
 
     for (const assertion of testCase.assertions) {
       assertions.push(evaluateAssertion(assertion, stepResults, validation))

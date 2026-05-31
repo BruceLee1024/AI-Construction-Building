@@ -105,6 +105,7 @@ export type HarnessAssertion =
 export interface HarnessCase {
   name: string
   description?: string
+  validationArgs?: Record<string, JsonValue>
   steps: HarnessStep[]
   assertions: HarnessAssertion[]
 }
@@ -155,6 +156,9 @@ export function assertHarnessCase(value: unknown, filePath: string): asserts val
   }
   if (!Array.isArray(value.assertions) || value.assertions.length === 0) {
     throw new Error(`${filePath}: assertions must be a non-empty array`)
+  }
+  if (value.validationArgs != null && !isRecord(value.validationArgs)) {
+    throw new Error(`${filePath}: validationArgs must be an object when provided`)
   }
 
   value.steps.forEach((step, index) => {
