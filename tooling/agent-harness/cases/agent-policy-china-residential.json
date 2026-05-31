@@ -1,0 +1,15 @@
+{
+  "name": "agent-policy-china-residential",
+  "description": "Chinese residential requests automatically select the China residential profile and staged opening phase.",
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": { "origin": [0, 0], "width": 5, "depth": 4, "addDoor": true, "addWindows": true }
+    }
+  ],
+  "assertions": [
+    { "type": "agent.policy", "userContent": "创建一个符合中国住宅规则的两居户型", "codeProfile": "china_residential", "phase": "layout", "isComplex": true },
+    { "type": "agent.policy", "userContent": "Create one simple 5m by 4m room", "codeProfile": "residential_default", "isComplex": false },
+    { "type": "toolResult.includesSuggestions", "step": 0, "tools": ["create_zone", "validate_scene"] }
+  ]
+}

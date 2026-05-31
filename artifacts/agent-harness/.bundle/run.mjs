@@ -17851,6 +17851,7 @@ function formatValidationReport(result) {
     return acc;
   }, {});
   const blockingRuleIds = Array.from(new Set(result.issues.filter((i) => i.severity === "warning" && (i.type === "code" || i.type === "bounds" || i.type === "gap" || i.type === "overlap")).map((i) => i.ruleId)));
+  const repairHints = buildRepairHints(result.issues);
   if (result.issues.length === 0) {
     return JSON.stringify({
       valid: true,
@@ -17862,6 +17863,7 @@ function formatValidationReport(result) {
       issueSummary: {},
       ruleSummary: {},
       blockingRuleIds: [],
+      repairHints: [],
       issues: [],
       message: "No spatial or building-code issues found",
       nextAction: "Continue to the next staged generation phase."
@@ -17877,6 +17879,7 @@ function formatValidationReport(result) {
     issueSummary,
     ruleSummary,
     blockingRuleIds,
+    repairHints,
     issues: result.issues.map((i) => ({
       type: i.type,
       severity: i.severity,
@@ -17887,10 +17890,136 @@ function formatValidationReport(result) {
     nextAction: blocking ? "Fix blocking warnings before continuing to furniture, roof, decoration, or finalization." : "Only informational issues remain; continue to the next staged generation phase."
   });
 }
+function buildRepairHints(issues) {
+  const hints = /* @__PURE__ */ new Map();
+  for (const issue2 of issues) {
+    if (!(issue2.severity === "warning" && (issue2.type === "code" || issue2.type === "bounds" || issue2.type === "gap" || issue2.type === "overlap"))) {
+      continue;
+    }
+    const hint = repairHintForIssue(issue2);
+    hints.set(`${hint.ruleId}:${hint.nodeId}`, hint);
+  }
+  return Array.from(hints.values());
+}
+function repairHintForIssue(issue2) {
+  switch (issue2.ruleId) {
+    case "door.clear_width":
+      return {
+        ruleId: issue2.ruleId,
+        nodeId: issue2.nodeId,
+        preferredTools: ["modify_node"],
+        suggestedAction: "Increase the door width to meet the clear-width threshold.",
+        targetMetrics: { minWidthMeters: 0.8 }
+      };
+    case "corridor.min_width":
+    case "circulation.entry_clear_width":
+      return {
+        ruleId: issue2.ruleId,
+        nodeId: issue2.nodeId,
+        preferredTools: ["move_nodes", "modify_node", "create_hallway"],
+        suggestedAction: "Widen the circulation space or recreate the hallway/entry with a larger clear width.",
+        targetMetrics: { minClearWidthMeters: 1.1 }
+      };
+    case "room.daylight_ratio":
+    case "room.main_space_daylight":
+      return {
+        ruleId: issue2.ruleId,
+        nodeId: issue2.nodeId,
+        preferredTools: ["add_window_to_wall", "auto_align_windows", "create_window"],
+        suggestedAction: "Add or enlarge exterior windows for this main room before furnishing.",
+        targetMetrics: { minDaylightRatio: 0.1 }
+      };
+    case "room.has_door":
+      return {
+        ruleId: issue2.ruleId,
+        nodeId: issue2.nodeId,
+        preferredTools: ["add_door_to_wall", "create_door"],
+        suggestedAction: "Add a usable door to the room boundary."
+      };
+    case "geometry.slab_overlap":
+      return {
+        ruleId: issue2.ruleId,
+        nodeId: issue2.nodeId,
+        preferredTools: ["move_nodes", "delete_node", "create_room", "create_polygon_room"],
+        suggestedAction: "Move or recreate the overlapping room slabs so they are adjacent or separated, not overlapping."
+      };
+    case "opening.overlap":
+    case "opening.edge_clearance":
+    case "opening.min_spacing":
+      return {
+        ruleId: issue2.ruleId,
+        nodeId: issue2.nodeId,
+        preferredTools: ["modify_node", "move_nodes", "auto_align_windows", "add_window_to_wall"],
+        suggestedAction: "Move openings away from wall ends and each other, or use auto alignment on suitable exterior walls.",
+        targetMetrics: { minEdgeClearanceMeters: 0.25, minOpeningSpacingMeters: 0.25 }
+      };
+    case "furniture.door_clearance":
+    case "circulation.furniture_clear_path":
+      return {
+        ruleId: issue2.ruleId,
+        nodeId: issue2.nodeId,
+        preferredTools: ["move_nodes", "place_in_room", "place_against_wall"],
+        suggestedAction: "Move furniture away from doors and circulation paths before continuing decoration.",
+        targetMetrics: { minClearanceMeters: 0.65 }
+      };
+    case "room.kitchen_ventilation":
+    case "room.bathroom_ventilation":
+      return {
+        ruleId: issue2.ruleId,
+        nodeId: issue2.nodeId,
+        preferredTools: ["add_window_to_wall", "auto_align_windows", "create_window"],
+        suggestedAction: "Add an exterior window or ventilation opening for the wet/service room."
+      };
+    case "window.fall_protection":
+      return {
+        ruleId: issue2.ruleId,
+        nodeId: issue2.nodeId,
+        preferredTools: ["modify_node"],
+        suggestedAction: "Raise the sill height or change the window dimensions before treating the model as code-ready.",
+        targetMetrics: { minSillHeightMeters: 0.9 }
+      };
+    default:
+      return {
+        ruleId: issue2.ruleId,
+        nodeId: issue2.nodeId,
+        preferredTools: ["modify_node", "move_nodes"],
+        suggestedAction: "Adjust the referenced geometry or metadata, then validate again before moving to the next phase."
+      };
+  }
+}
 
 // packages/editor/src/lib/agent/executor.ts
+var lastValidationReport = null;
 function round3(v) {
   return Math.round(v * 1e3) / 1e3;
+}
+function compactIds(values) {
+  return values.filter((value) => typeof value === "string" && value.length > 0);
+}
+function isRecordLike(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function createdByType(entries) {
+  return Object.fromEntries(
+    Object.entries(entries).map(([type, values]) => [type, compactIds(values)]).filter(([, ids]) => ids.length > 0)
+  );
+}
+function polygonBounds2(polygon) {
+  const xs = polygon.map((p) => p[0]);
+  const zs = polygon.map((p) => p[1]);
+  return {
+    minX: round3(Math.min(...xs)),
+    minZ: round3(Math.min(...zs)),
+    maxX: round3(Math.max(...xs)),
+    maxZ: round3(Math.max(...zs))
+  };
+}
+function polygonArea2(polygon) {
+  let area = 0;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    area += (polygon[j][0] + polygon[i][0]) * (polygon[j][1] - polygon[i][1]);
+  }
+  return round3(Math.abs(area) / 2);
 }
 var recentWallIds = [];
 function getActiveLevelId() {
@@ -18208,7 +18337,18 @@ function createRoom(args) {
     success: true,
     walls: wallResult,
     slab: slabResult,
-    spatialContext
+    createdNodeIds: compactIds([
+      ...Array.isArray(wallResult.wallIds) ? wallResult.wallIds : [],
+      slabResult.slabId
+    ]),
+    createdByType: createdByType({
+      wall: Array.isArray(wallResult.wallIds) ? wallResult.wallIds : [],
+      slab: [slabResult.slabId]
+    }),
+    spatialContext,
+    usableBounds: spatialContext.interiorBounds,
+    candidateWalls: spatialContext.wallsByFace,
+    suggestedNextTools: ["create_zone", "add_door_to_wall", "add_window_to_wall", "validate_scene"]
   };
   if (addDoor) {
     const wallIndexMap = {
@@ -18224,6 +18364,11 @@ function createRoom(args) {
       })
     );
     results.door = doorResult;
+    results.createdNodeIds = compactIds([...results.createdNodeIds, doorResult.doorId]);
+    results.createdByType = {
+      ...results.createdByType,
+      door: compactIds([doorResult.doorId])
+    };
   }
   if (addWindows) {
     const doorWallIndex = { front: 0, right: 1, back: 2, left: 3 }[doorWall] ?? 0;
@@ -18236,6 +18381,14 @@ function createRoom(args) {
       windowResults.push(wResult);
     }
     results.windows = windowResults;
+    results.createdNodeIds = compactIds([
+      ...results.createdNodeIds,
+      ...windowResults.map((result) => isRecordLike(result) ? result.windowId : void 0)
+    ]);
+    results.createdByType = {
+      ...results.createdByType,
+      window: compactIds(windowResults.map((result) => isRecordLike(result) ? result.windowId : void 0))
+    };
   }
   if (addCeiling) {
     const ceilingPolygon = [
@@ -18248,6 +18401,11 @@ function createRoom(args) {
       createCeiling({ polygon: ceilingPolygon, height: ceilingHeight })
     );
     results.ceiling = ceilingResult;
+    results.createdNodeIds = compactIds([...results.createdNodeIds, ceilingResult.ceilingId]);
+    results.createdByType = {
+      ...results.createdByType,
+      ceiling: compactIds([ceilingResult.ceilingId])
+    };
   }
   return JSON.stringify(results);
 }
@@ -18289,7 +18447,17 @@ function createZone(args) {
     success: true,
     zoneId: zone.id,
     name,
-    ...roomType ? { roomType } : {}
+    ...roomType ? { roomType } : {},
+    createdNodeIds: [zone.id],
+    createdByType: { zone: [zone.id] },
+    spatialContext: {
+      polygon,
+      bounds: polygonBounds2(polygon),
+      area: polygonArea2(polygon),
+      roomType: roomType ?? null
+    },
+    usableBounds: polygonBounds2(polygon),
+    suggestedNextTools: ["validate_scene", "add_door_to_wall", "add_window_to_wall"]
   });
 }
 function createRoof(args) {
@@ -18334,6 +18502,9 @@ function createApartment(args) {
   const wallThickness = args.wallThickness ?? 0.15;
   const maxRowWidth = args.maxRowWidth ?? 20;
   const results = [];
+  const allCreatedIds = [];
+  const allByType = {};
+  const roomContexts = [];
   let curX = origin[0];
   let curZ = origin[1];
   let rowMaxDepth = 0;
@@ -18368,6 +18539,23 @@ function createApartment(args) {
         ]
       })
     );
+    const createdNodeIds = Array.isArray(roomResult.createdNodeIds) ? roomResult.createdNodeIds : [];
+    const zoneIds = compactIds([zoneResult.zoneId]);
+    allCreatedIds.push(...compactIds([...createdNodeIds, ...zoneIds]));
+    for (const [type, ids] of Object.entries({
+      ...isRecordLike(roomResult.createdByType) ? roomResult.createdByType : {},
+      zone: zoneIds
+    })) {
+      allByType[type] = [...allByType[type] ?? [], ...compactIds(Array.isArray(ids) ? ids : [])];
+    }
+    roomContexts.push({
+      name: room.name,
+      roomType: room.roomType ?? null,
+      slabId: isRecordLike(roomResult.slab) ? roomResult.slab.slabId : void 0,
+      zoneId: zoneResult.zoneId,
+      spatialContext: roomResult.spatialContext,
+      candidateWalls: roomResult.candidateWalls
+    });
     results.push({
       room: room.name,
       ...roomResult,
@@ -18379,7 +18567,15 @@ function createApartment(args) {
   return JSON.stringify({
     success: true,
     roomCount: rooms.length,
-    rooms: results
+    rooms: results,
+    createdNodeIds: allCreatedIds,
+    createdByType: allByType,
+    spatialContext: {
+      origin,
+      maxRowWidth,
+      rooms: roomContexts
+    },
+    suggestedNextTools: ["validate_scene", "add_window_to_wall", "auto_align_windows", "place_in_room"]
   });
 }
 function createLShapedRoom(args) {
@@ -18516,7 +18712,8 @@ function getSceneInfo() {
       ceilings.push({ id: c.id, height: c.height });
     } else if (node.type === "zone") {
       const z2 = node;
-      zones.push({ id: z2.id, name: z2.name, color: z2.color });
+      const metadata = node.metadata;
+      zones.push({ id: z2.id, name: z2.name, color: z2.color, roomType: metadata?.roomType });
     } else if (node.type === "roof") {
       roofs.push({ id: node.id });
     } else if (node.type === "item") {
@@ -18560,6 +18757,7 @@ function getSceneInfo() {
     }
     area = round3(Math.abs(area) / 2);
     let zoneName = null;
+    let roomType = null;
     for (const z2 of zones) {
       const zNode = nodes[z2.id];
       if (zNode?.polygon) {
@@ -18569,6 +18767,7 @@ function getSceneInfo() {
         ];
         if (pointInPolygonSimple(zCentroid[0], zCentroid[1], slab.polygon)) {
           zoneName = z2.name;
+          roomType = z2.roomType ?? null;
           break;
         }
       }
@@ -18577,14 +18776,44 @@ function getSceneInfo() {
       const pos = itm.position;
       return pos && pointInPolygonSimple(pos[0], pos[2], slab.polygon);
     }).map((itm) => ({ id: itm.id, name: itm.name, catalogId: itm.catalogId }));
+    const slabWallIds = walls.filter((wall) => {
+      const w = nodes[wall.id];
+      if (!w.start || !w.end) return false;
+      return pointInPolygonSimple(w.start[0], w.start[1], slab.polygon) || pointInPolygonSimple(w.end[0], w.end[1], slab.polygon);
+    }).map((wall) => wall.id);
+    const windowCount = windows.filter((window2) => slabWallIds.includes(String(window2.parentWallId))).length;
+    const doorCount = doors.filter((door) => slabWallIds.includes(String(door.parentWallId))).length;
     roomSummaries.push({
       slabId: slab.id,
       zoneName,
       bounds: { minX, minZ, maxX, maxZ },
       area,
-      furniture: containedItems
+      furniture: containedItems,
+      shortSide: round3(Math.min(maxX - minX, maxZ - minZ)),
+      roomType,
+      windowCount,
+      doorCount
     });
   }
+  const architecturalSummary = {
+    spaces: roomSummaries.map((room) => ({
+      slabId: room.slabId,
+      zoneName: room.zoneName,
+      roomType: room.roomType,
+      area: room.area,
+      shortSide: room.shortSide,
+      bounds: room.bounds,
+      doorCount: room.doorCount,
+      windowCount: room.windowCount,
+      needsOpeningAttention: room.doorCount === 0 || windowCountNeedsAttention(room.roomType, room.windowCount)
+    })),
+    openingCounts: {
+      doors: doors.length,
+      windows: windows.length
+    },
+    exteriorWallCandidates: walls.filter((wall) => Number(wall.length) >= 1.2).slice(0, 12).map((wall) => ({ id: wall.id, length: wall.length, start: wall.start, end: wall.end })),
+    suggestedNextTools: roomSummaries.length === 0 ? ["create_room", "create_apartment", "create_polygon_room"] : ["validate_scene", "add_door_to_wall", "add_window_to_wall", "auto_align_windows", "place_in_room"]
+  };
   return JSON.stringify({
     levelId,
     activeLevelName: allLevels.find((l) => l.isActive)?.name ?? "Level 0",
@@ -18601,6 +18830,14 @@ function getSceneInfo() {
       isEmpty: walls.length === 0 && slabs.length === 0
     },
     allLevels,
+    architecturalSummary,
+    lastValidation: lastValidationReport ? {
+      codeProfile: lastValidationReport.codeProfile,
+      blocking: lastValidationReport.blocking,
+      blockingRuleIds: lastValidationReport.blockingRuleIds,
+      ruleSummary: lastValidationReport.ruleSummary,
+      repairHints: lastValidationReport.repairHints
+    } : null,
     roomSummaries,
     wallDetails: walls,
     doorDetails: doors,
@@ -18618,6 +18855,10 @@ function isChildOfLevel(node, nodes, levelId) {
   const parent = nodes[node.parentId];
   if (!parent) return false;
   return parent.parentId === levelId;
+}
+function windowCountNeedsAttention(roomType, windowCount) {
+  if (typeof roomType !== "string") return windowCount === 0;
+  return ["bedroom", "living", "kitchen", "bathroom"].includes(roomType) && windowCount === 0;
 }
 function deleteNode(args) {
   const nodeId = args.nodeId;
@@ -18860,23 +19101,63 @@ function createPolygonRoom(args) {
   const wallResult = JSON.parse(createWalls({ walls: wallDefs }));
   const results = {
     success: true,
-    walls: wallResult
+    walls: wallResult,
+    createdNodeIds: compactIds(Array.isArray(wallResult.wallIds) ? wallResult.wallIds : []),
+    createdByType: createdByType({
+      wall: Array.isArray(wallResult.wallIds) ? wallResult.wallIds : []
+    }),
+    spatialContext: {
+      polygon,
+      bounds: polygonBounds2(polygon),
+      area: polygonArea2(polygon),
+      edges: polygon.map((point, index) => {
+        const next = polygon[(index + 1) % polygon.length];
+        return {
+          index,
+          wallId: Array.isArray(wallResult.wallIds) ? wallResult.wallIds[index] : void 0,
+          start: point,
+          end: next,
+          length: round3(Math.sqrt((next[0] - point[0]) ** 2 + (next[1] - point[1]) ** 2))
+        };
+      })
+    },
+    candidateWalls: polygon.map((_point, index) => ({
+      index,
+      wallId: Array.isArray(wallResult.wallIds) ? wallResult.wallIds[index] : void 0
+    })),
+    suggestedNextTools: ["create_zone", "add_door_to_wall", "add_window_to_wall", "validate_scene"]
   };
   if (addSlab) {
     const slabResult = JSON.parse(createSlab({ polygon }));
     results.slab = slabResult;
+    results.createdNodeIds = compactIds([...results.createdNodeIds, slabResult.slabId]);
+    results.createdByType = {
+      ...results.createdByType,
+      slab: compactIds([slabResult.slabId])
+    };
+    results.usableBounds = polygonBounds2(polygon);
   }
   if (addDoor && doorEdgeIndex >= 0 && doorEdgeIndex < polygon.length) {
     const doorResult = JSON.parse(
       createDoor({ wallIndex: doorEdgeIndex, position_t: 0.5 })
     );
     results.door = doorResult;
+    results.createdNodeIds = compactIds([...results.createdNodeIds, doorResult.doorId]);
+    results.createdByType = {
+      ...results.createdByType,
+      door: compactIds([doorResult.doorId])
+    };
   }
   if (zoneName) {
     const zoneResult = JSON.parse(
       createZone({ name: zoneName, polygon, color: zoneColor, roomType: zoneRoomType })
     );
     results.zone = zoneResult;
+    results.createdNodeIds = compactIds([...results.createdNodeIds, zoneResult.zoneId]);
+    results.createdByType = {
+      ...results.createdByType,
+      zone: compactIds([zoneResult.zoneId])
+    };
   }
   return JSON.stringify(results);
 }
@@ -18967,7 +19248,16 @@ function placeFurniture(args) {
     bbox,
     insideSlabId: insideRoom,
     collisions: collisions.length > 0 ? collisions : void 0,
-    warning: warnings.length > 0 ? warnings.join(" | ") : void 0
+    warning: warnings.length > 0 ? warnings.join(" | ") : void 0,
+    createdNodeIds: [item.id],
+    createdByType: { item: [item.id] },
+    spatialContext: {
+      bbox,
+      insideSlabId: insideRoom,
+      collisions
+    },
+    usableBounds: bbox,
+    suggestedNextTools: warnings.length > 0 ? ["move_nodes", "validate_scene"] : ["validate_scene", "place_in_room", "place_against_wall"]
   });
 }
 function pointInPolygonSimple(x, z2, polygon) {
@@ -20009,7 +20299,13 @@ function placeCeilingItem(args) {
 function validateScene(args = {}) {
   const levelId = getLevelId();
   const result = validateAndCorrectScene(levelId, args.codeProfile);
-  return formatValidationReport(result);
+  const report = formatValidationReport(result);
+  try {
+    lastValidationReport = JSON.parse(report);
+  } catch {
+    lastValidationReport = null;
+  }
+  return report;
 }
 function autoAlignWindows(args) {
   const wallIds = args.wallIds;
@@ -21121,13 +21417,7 @@ var agentTools = [
       description: "Undo the last scene change. Can be called multiple times to undo multiple steps.",
       parameters: {
         type: "object",
-        properties: {
-          codeProfile: {
-            type: "string",
-            enum: ["residential_default", "china_residential"],
-            description: "Optional building-rule profile. Defaults to residential_default; use china_residential for Chinese residential layouts."
-          }
-        },
+        properties: {},
         required: []
       }
     }
@@ -22011,7 +22301,13 @@ var agentTools = [
       description: "Validate and auto-correct spatial issues on the current level. Fixes: wall endpoint gaps (snaps within 5cm), furniture outside room boundaries (nudges inside), door/window overflows (clamps position). Reports warnings for wall gaps, overlaps, circulation, simplified building-code guardrails, daylight/ventilation, door widths, corridor widths, room proportions, and upper-floor fall hazards. Auto-runs after every scene modification, but can be called manually to inspect before continuing.",
       parameters: {
         type: "object",
-        properties: {},
+        properties: {
+          codeProfile: {
+            type: "string",
+            enum: ["residential_default", "china_residential"],
+            description: "Optional building-rule profile. Defaults to residential_default; use china_residential for Chinese residential layouts."
+          }
+        },
         required: []
       }
     }
@@ -22105,6 +22401,45 @@ function allowsRapidConcept(content) {
   const normalized = content.toLowerCase();
   return /快速|草图|概念|随便|rough|quick|draft|concept/.test(normalized);
 }
+function resolveAgentRunPolicy(userContent, lastValidation = null) {
+  const normalized = userContent.toLowerCase();
+  const isChineseResidential = /中文|中国|国标|住宅|公寓|户型|两居|三居|卧室|客厅|厨房|卫生间|阳台/.test(userContent);
+  const isResidential = isChineseResidential || /residential|apartment|house|home|bedroom|living|kitchen|bathroom/.test(normalized);
+  const isMultiLevel = /多层|楼层|加层|二层|三层|multi-story|multistory|floor|level|second floor|third floor/.test(normalized);
+  const includesFurnishing = /家具|软装|装修|摆放|沙发|床|furnish|furniture|sofa|bed|decor/.test(normalized);
+  const includesRoofOrDetail = /屋顶|屋面|roof|detail|decoration|装饰/.test(normalized);
+  const rapid = allowsRapidConcept(userContent);
+  const isComplex = isComplexGenerationRequest(userContent);
+  let phase = "layout";
+  if (lastValidation?.blocking) {
+    phase = "validation_repair";
+  } else if (isComplex && !rapid) {
+    phase = "layout";
+  } else if (includesRoofOrDetail) {
+    phase = "roof_detail";
+  } else if (includesFurnishing) {
+    phase = "furnishing";
+  } else if (isResidential || isComplex) {
+    phase = "openings";
+  }
+  const repairTools = ["modify_node", "move_nodes", "batch_modify_nodes", "add_door_to_wall", "add_window_to_wall", "auto_align_windows", "delete_node", "validate_scene"];
+  const layoutTools = ["create_room", "create_apartment", "create_polygon_room", "create_l_shaped_room", "create_hallway", "create_walls", "create_slab", "create_zone", "validate_scene"];
+  const openingTools = ["create_door", "create_window", "add_door_to_wall", "add_window_to_wall", "auto_align_windows", "create_zone", "validate_scene"];
+  const furnishingTools = ["place_furniture", "place_in_room", "place_against_wall", "furnish_room", "place_wall_item", "place_ceiling_item", "validate_scene"];
+  const roofTools = ["create_roof", "create_ceiling", "place_wall_item", "place_ceiling_item", "validate_scene"];
+  const allowedNextTools = phase === "validation_repair" ? repairTools : phase === "furnishing" ? furnishingTools : phase === "roof_detail" ? roofTools : phase === "openings" ? [...openingTools, ...layoutTools] : layoutTools;
+  return {
+    codeProfile: isChineseResidential ? "china_residential" : "residential_default",
+    phase,
+    isComplex,
+    isResidential,
+    isMultiLevel,
+    includesFurnishing,
+    allowsRapidConcept: rapid,
+    allowedNextTools,
+    deferredTools: phase === "validation_repair" ? Array.from(POST_LAYOUT_TOOLS) : []
+  };
+}
 function parseValidationSnapshot(raw) {
   try {
     const parsed = JSON.parse(raw);
@@ -22115,60 +22450,40 @@ function parseValidationSnapshot(raw) {
       warningCount: parsed.warningCount ?? 0,
       issues: Array.isArray(parsed.issues) ? parsed.issues : [],
       nextAction: parsed.nextAction,
-      issueSummary: parsed.issueSummary
+      issueSummary: parsed.issueSummary,
+      ruleSummary: parsed.ruleSummary,
+      blockingRuleIds: parsed.blockingRuleIds,
+      repairHints: Array.isArray(parsed.repairHints) ? parsed.repairHints : []
     };
   } catch {
     return null;
   }
 }
-function buildValidationMessage(snapshot) {
-  const lines = ["[Spatial Auto-Validation Report]"];
-  lines.push(`Status: ${snapshot.valid ? "passed" : "needs fixes"} | Auto-fixed: ${snapshot.fixedCount} | Warnings: ${snapshot.warningCount}`);
-  if (snapshot.issueSummary && Object.keys(snapshot.issueSummary).length > 0) {
-    lines.push(`Issue summary: ${Object.entries(snapshot.issueSummary).map(([type, count]) => `${type}=${count}`).join(", ")}`);
-  }
-  if (snapshot.issues.length > 0) {
-    lines.push("");
-    for (const issue2 of snapshot.issues.slice(0, 12)) {
-      const icon = issue2.severity === "fixed" ? "\u{1F527}" : issue2.type === "code" ? "\u{1F4D0}" : "\u26A0\uFE0F";
-      lines.push(`${icon} [${issue2.type}] ${issue2.message}`);
-    }
-    if (snapshot.issues.length > 12) {
-      lines.push(`... ${snapshot.issues.length - 12} more issues omitted; use issueSummary and blockingIssues first.`);
-    }
-  }
-  lines.push("");
-  lines.push(snapshot.nextAction ?? (snapshot.blocking ? "Next action: fix the warnings before moving to the next generation phase." : "Next action: validation passed; continue to the next staged phase."));
-  if (snapshot.issues.length > 0) {
-    lines.push("");
-    lines.push("Tips to avoid these issues:");
-    if (snapshot.issues.some((i) => i.type === "bounds")) {
-      lines.push("- Furniture placement: ensure position is inside the room slab polygon. Use interiorBounds from createRoom result.");
-    }
-    if (snapshot.issues.some((i) => i.type === "snap")) {
-      lines.push("- Wall endpoints: adjacent walls should share exact coordinates. Use the same [x,z] for connected corners.");
-    }
-    if (snapshot.issues.some((i) => i.type === "gap")) {
-      lines.push("- Wall gaps detected: check that wall endpoints form a closed loop with no small gaps.");
-    }
-    if (snapshot.issues.some((i) => i.type === "overlap")) {
-      lines.push("- Overlaps: ensure doors/windows do not collide on the same wall, and furniture is spaced out to avoid collision.");
-    }
-    if (snapshot.issues.some((i) => i.type === "info")) {
-      lines.push("- Design advice: Check daylight ratios, large spans, structural support, and wet-room ventilation.");
-    }
-    if (snapshot.issues.some((i) => i.type === "code")) {
-      lines.push("- Building-code checks: Respect door/corridor clear widths, usable room proportions, daylight/ventilation, and upper-floor fall protection.");
-      lines.push("- Do not continue to furniture or roof detailing until code warnings from the structural/layout phase are resolved.");
-    }
-  }
-  return lines.join("\n");
+function buildValidationMessage(snapshot, policy) {
+  const payload = {
+    type: "spatial_validation",
+    codeProfile: policy.codeProfile,
+    phase: snapshot.blocking ? "validation_repair" : policy.phase,
+    valid: snapshot.valid,
+    blocking: snapshot.blocking,
+    fixedCount: snapshot.fixedCount,
+    warningCount: snapshot.warningCount,
+    blockingRuleIds: snapshot.blockingRuleIds ?? [],
+    ruleSummary: snapshot.ruleSummary ?? {},
+    repairHints: (snapshot.repairHints ?? []).slice(0, 8),
+    allowedNextTools: snapshot.blocking ? policy.allowedNextTools : void 0,
+    nextAction: snapshot.nextAction ?? (snapshot.blocking ? "Use repairHints with the allowed repair tools, then validate again before furniture/roof/detail work." : "Validation passed; continue to the next staged generation phase.")
+  };
+  return `[Spatial Auto-Validation JSON]
+${JSON.stringify(payload, null, 2)}`;
 }
-function stagedDeferralForTool(toolName, userContent, lastValidation) {
-  if (ONE_SHOT_MACRO_TOOLS.has(toolName) && isComplexGenerationRequest(userContent) && !allowsRapidConcept(userContent)) {
+function stagedDeferralForTool(toolName, userContent, lastValidation, policy = resolveAgentRunPolicy(userContent, lastValidation)) {
+  if (ONE_SHOT_MACRO_TOOLS.has(toolName) && policy.isComplex && !policy.allowsRapidConcept) {
     return {
       deferred: true,
       tool: toolName,
+      phaseBlockedBy: policy.phase,
+      allowedNextTools: policy.allowedNextTools,
       reason: "This request is complex/code-sensitive, so one-shot macro generation is disabled. Build layout first, validate, then add openings, furniture, and details in later phases.",
       nextAction: "Use create_apartment/create_room/create_polygon_room/create_hallway for the layout phase, then wait for validation feedback."
     };
@@ -22177,6 +22492,10 @@ function stagedDeferralForTool(toolName, userContent, lastValidation) {
     return {
       deferred: true,
       tool: toolName,
+      phaseBlockedBy: "validation_repair",
+      allowedNextTools: policy.allowedNextTools,
+      requiredRuleFixes: lastValidation.blockingRuleIds ?? [],
+      repairHints: (lastValidation.repairHints ?? []).slice(0, 5),
       reason: "The previous validation report still has warnings. Post-layout work is blocked until those warnings are fixed.",
       blockingIssues: lastValidation.issues.filter((issue2) => issue2.severity === "warning").slice(0, 5).map((issue2) => ({
         type: issue2.type,
@@ -22235,8 +22554,12 @@ async function runAgentLoop(userContent, get, set2) {
   let lastValidation = null;
   while (iteration < MAX_ITERATIONS) {
     iteration++;
+    const runPolicy = resolveAgentRunPolicy(userContent, lastValidation);
     const sceneContext = executeToolCall("get_scene_info", {});
     const systemWithContext = `${SYSTEM_PROMPT}
+
+## Agent Run Policy
+${JSON.stringify(runPolicy, null, 2)}
 
 ## Current Scene State
 ${sceneContext}`;
@@ -22285,13 +22608,15 @@ ${sceneContext}`;
         const toolArgs = JSON.parse(tc.arguments);
         const isSceneModifyingTool = SCENE_MODIFYING_TOOLS.has(tc.name);
         let result;
-        const stagedDeferral = isSceneModifyingTool ? stagedDeferralForTool(tc.name, userContent, lastValidation) : null;
+        const stagedDeferral = isSceneModifyingTool ? stagedDeferralForTool(tc.name, userContent, lastValidation, runPolicy) : null;
         if (stagedDeferral) {
           result = JSON.stringify(stagedDeferral);
         } else if (isSceneModifyingTool && sceneModificationCount >= MAX_SCENE_MODIFYING_TOOLS_PER_ITERATION) {
           result = JSON.stringify({
             deferred: true,
             tool: tc.name,
+            phaseBlockedBy: runPolicy.phase,
+            allowedNextTools: runPolicy.allowedNextTools,
             reason: "Scene generation is staged. Review the validation report from the previous modification, then call this tool again if it is still appropriate.",
             nextAction: "Continue with the next architectural phase only after spatial and building-code warnings are resolved."
           });
@@ -22313,14 +22638,14 @@ ${sceneContext}`;
         }));
       }
       if (hasSceneModification) {
-        const validationResult = executeToolCall("validate_scene", {});
+        const validationResult = executeToolCall("validate_scene", { codeProfile: runPolicy.codeProfile });
         const snapshot = parseValidationSnapshot(validationResult);
         if (snapshot) {
           lastValidation = snapshot;
           const validationMsg = {
             id: genId(),
             role: "system",
-            content: buildValidationMessage(snapshot)
+            content: buildValidationMessage(snapshot, resolveAgentRunPolicy(userContent, snapshot))
           };
           set2((s) => ({
             messages: [...s.messages, validationMsg]
@@ -22647,6 +22972,12 @@ function evaluateAssertion(assertion, steps, validation) {
       return assertToolResultSuccess(assertion.step, assertion.expected ?? true, steps);
     case "toolResult.field":
       return assertToolResultField(assertion, steps);
+    case "toolResult.includesSuggestions":
+      return assertToolResultIncludesSuggestions(assertion, steps);
+    case "agent.policy":
+      return assertAgentPolicy(assertion);
+    case "agent.deferral":
+      return assertAgentDeferral(assertion);
     case "node.count":
       return assertNodeCount(assertion);
     case "node.exists":
@@ -22659,6 +22990,8 @@ function evaluateAssertion(assertion, steps, validation) {
       return assertNoSlabOverlap();
     case "geometry.openingsFitWall":
       return assertOpeningsFitWall();
+    case "validation.repairHints":
+      return assertValidationRepairHints(assertion, validation);
     case "validation":
       return assertValidation(assertion, validation);
     default:
@@ -22696,6 +23029,70 @@ function assertToolResultField(assertion, steps) {
     pass,
     type: "toolResult.field",
     message: `step ${assertion.step} field ${assertion.path} expected ${JSON.stringify(assertion.expected)}, received ${JSON.stringify(actual)}`
+  };
+}
+function assertToolResultIncludesSuggestions(assertion, steps) {
+  const step = steps[assertion.step];
+  const suggestions = getByPath(step?.parsed, "suggestedNextTools");
+  const failures = [];
+  if (!Array.isArray(suggestions)) {
+    failures.push("suggestedNextTools was not an array");
+  } else {
+    for (const tool of assertion.tools) {
+      if (!suggestions.includes(tool)) failures.push(`missing suggested tool ${tool}`);
+    }
+  }
+  return {
+    pass: failures.length === 0,
+    type: "toolResult.includesSuggestions",
+    message: failures.length === 0 ? "suggested tools matched" : failures.join("; ")
+  };
+}
+function assertAgentPolicy(assertion) {
+  const policy = resolveAgentRunPolicy(assertion.userContent);
+  const failures = [];
+  if (assertion.codeProfile !== void 0 && policy.codeProfile !== assertion.codeProfile) {
+    failures.push(`codeProfile expected ${assertion.codeProfile}, received ${policy.codeProfile}`);
+  }
+  if (assertion.phase !== void 0 && policy.phase !== assertion.phase) {
+    failures.push(`phase expected ${assertion.phase}, received ${policy.phase}`);
+  }
+  if (assertion.isComplex !== void 0 && policy.isComplex !== assertion.isComplex) {
+    failures.push(`isComplex expected ${assertion.isComplex}, received ${policy.isComplex}`);
+  }
+  if (assertion.includesFurnishing !== void 0 && policy.includesFurnishing !== assertion.includesFurnishing) {
+    failures.push(`includesFurnishing expected ${assertion.includesFurnishing}, received ${policy.includesFurnishing}`);
+  }
+  return {
+    pass: failures.length === 0,
+    type: "agent.policy",
+    message: failures.length === 0 ? "agent policy matched" : failures.join("; ")
+  };
+}
+function assertAgentDeferral(assertion) {
+  const lastValidation = isRecord(assertion.lastValidation) ? assertion.lastValidation : null;
+  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation);
+  const result = stagedDeferralForTool(assertion.toolName, assertion.userContent, lastValidation, policy);
+  const failures = [];
+  const expectedDeferred = assertion.deferred ?? true;
+  if (Boolean(result?.deferred) !== expectedDeferred) {
+    failures.push(`deferred expected ${expectedDeferred}, received ${Boolean(result?.deferred)}`);
+  }
+  if (assertion.phaseBlockedBy !== void 0 && result?.phaseBlockedBy !== assertion.phaseBlockedBy) {
+    failures.push(`phaseBlockedBy expected ${assertion.phaseBlockedBy}, received ${String(result?.phaseBlockedBy)}`);
+  }
+  const allowedTools = Array.isArray(result?.allowedNextTools) ? result.allowedNextTools : [];
+  for (const tool of assertion.mustIncludeAllowedTools ?? []) {
+    if (!allowedTools.includes(tool)) failures.push(`allowedNextTools missing ${tool}`);
+  }
+  const requiredRuleFixes = Array.isArray(result?.requiredRuleFixes) ? result.requiredRuleFixes : [];
+  for (const ruleId of assertion.mustIncludeRuleIds ?? []) {
+    if (!requiredRuleFixes.includes(ruleId)) failures.push(`requiredRuleFixes missing ${ruleId}`);
+  }
+  return {
+    pass: failures.length === 0,
+    type: "agent.deferral",
+    message: failures.length === 0 ? "agent deferral matched" : failures.join("; ")
   };
 }
 function assertNodeCount(assertion) {
@@ -22859,6 +23256,32 @@ function assertValidation(assertion, validation) {
     pass: failures.length === 0,
     type: "validation",
     message: failures.length === 0 ? "validation matched expectations" : failures.join("; ")
+  };
+}
+function assertValidationRepairHints(assertion, validation) {
+  if (!isRecord(validation) || !Array.isArray(validation.repairHints)) {
+    return { pass: false, type: "validation.repairHints", message: "validation.repairHints was not an array" };
+  }
+  const failures = [];
+  const hints = validation.repairHints.filter(isRecord);
+  const ruleIds = new Set(hints.map((hint) => hint.ruleId).filter((ruleId) => typeof ruleId === "string"));
+  const preferredTools = /* @__PURE__ */ new Set();
+  for (const hint of hints) {
+    if (!Array.isArray(hint.preferredTools)) continue;
+    for (const tool of hint.preferredTools) {
+      if (typeof tool === "string") preferredTools.add(tool);
+    }
+  }
+  for (const ruleId of assertion.mustIncludeRuleIds) {
+    if (!ruleIds.has(ruleId)) failures.push(`repairHints missing ruleId ${ruleId}`);
+  }
+  for (const tool of assertion.mustIncludePreferredTools ?? []) {
+    if (!preferredTools.has(tool)) failures.push(`repairHints missing preferred tool ${tool}`);
+  }
+  return {
+    pass: failures.length === 0,
+    type: "validation.repairHints",
+    message: failures.length === 0 ? "repair hints matched expectations" : failures.join("; ")
   };
 }
 function assertSummary(label, expected, actual, failures) {

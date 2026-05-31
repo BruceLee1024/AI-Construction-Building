@@ -17,9 +17,87 @@ import type { AnyNode, AnyNodeId } from '@pascal-app/core'
 import { CATALOG_ITEMS } from '../../components/ui/item-catalog/catalog-items'
 import { validateAndCorrectScene, formatValidationReport } from './spatial-validator'
 
+let lastValidationReport: Record<string, unknown> | null = null
+
 // Round to 3 decimal places for clean spatial feedback
 function round3(v: number): number {
   return Math.round(v * 1000) / 1000
+}
+
+function compactIds(values: unknown[]): string[] {
+  return values.filter((value): value is string => typeof value === 'string' && value.length > 0)
+}
+
+function isRecordLike(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function createdByType(entries: Record<string, unknown[]>): Record<string, string[]> {
+  return Object.fromEntries(
+    Object.entries(entries)
+      .map(([type, values]) => [type, compactIds(values)])
+      .filter(([, ids]) => (ids as string[]).length > 0),
+  ) as Record<string, string[]>
+}
+
+function polygonBounds(polygon: [number, number][]): { minX: number; minZ: number; maxX: number; maxZ: number } {
+  const xs = polygon.map((p) => p[0])
+  const zs = polygon.map((p) => p[1])
+  return {
+    minX: round3(Math.min(...xs)),
+    minZ: round3(Math.min(...zs)),
+    maxX: round3(Math.max(...xs)),
+    maxZ: round3(Math.max(...zs)),
+  }
+}
+
+function polygonArea(polygon: [number, number][]): number {
+  let area = 0
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    area += (polygon[j]![0] + polygon[i]![0]) * (polygon[j]![1] - polygon[i]![1])
+  }
+  return round3(Math.abs(area) / 2)
+}
+
+type Bounds2D = { minX: number; minZ: number; maxX: number; maxZ: number }
+type BBox2D = Bounds2D
+type FurniturePlacement = 'center' | 'wall' | 'corner' | 'service-wall'
+
+type FurnitureMetadata = {
+  footprintRole: 'seating' | 'sleeping' | 'table' | 'storage' | 'appliance' | 'sanitary' | 'decor' | 'lighting'
+  preferredPlacement: FurniturePlacement[]
+  frontClearance: number
+  sideClearance: number
+  wallBacked?: boolean
+}
+
+type FurnitureCandidate = {
+  itemId: string
+  position: [number, number, number]
+  rotation: number
+  bbox: BBox2D
+  score: number
+  clearanceScore: number
+  placement: string
+}
+
+type FurnitureRejection = {
+  itemId: string
+  position?: [number, number, number]
+  rotation?: number
+  reasons: string[]
+}
+
+type FurnitureSolveResult = {
+  success: boolean
+  roomType: string
+  slabId?: string
+  roomBounds: Bounds2D
+  availableFurnitureZones: Bounds2D[]
+  blockedZones: Array<BBox2D & { reason: string; nodeId?: string }>
+  placements: FurnitureCandidate[]
+  rejections: FurnitureRejection[]
+  suggestedNextTools: string[]
 }
 
 // Track recently created wall IDs so door/window placement can reference them by index
@@ -98,6 +176,10 @@ export function executeToolCall(
         return createPolygonRoom(args)
       case 'place_furniture':
         return placeFurniture(args)
+      case 'suggest_furniture_layout':
+        return suggestFurnitureLayout(args)
+      case 'place_furniture_solved':
+        return placeFurnitureSolved(args)
       case 'place_in_room':
         return placeInRoom(args)
       case 'place_against_wall':
@@ -392,7 +474,18 @@ function createRoom(args: Record<string, unknown>): string {
     success: true,
     walls: wallResult,
     slab: slabResult,
+    createdNodeIds: compactIds([
+      ...(Array.isArray(wallResult.wallIds) ? wallResult.wallIds : []),
+      slabResult.slabId,
+    ]),
+    createdByType: createdByType({
+      wall: Array.isArray(wallResult.wallIds) ? wallResult.wallIds : [],
+      slab: [slabResult.slabId],
+    }),
     spatialContext,
+    usableBounds: spatialContext.interiorBounds,
+    candidateWalls: spatialContext.wallsByFace,
+    suggestedNextTools: ['create_zone', 'add_door_to_wall', 'add_window_to_wall', 'validate_scene'],
   }
 
   // Add door
@@ -410,6 +503,11 @@ function createRoom(args: Record<string, unknown>): string {
       }),
     )
     results.door = doorResult
+    results.createdNodeIds = compactIds([...(results.createdNodeIds as string[]), doorResult.doorId])
+    results.createdByType = {
+      ...(results.createdByType as Record<string, string[]>),
+      door: compactIds([doorResult.doorId]),
+    }
   }
 
   // Add windows (on walls without door)
@@ -425,6 +523,14 @@ function createRoom(args: Record<string, unknown>): string {
       windowResults.push(wResult)
     }
     results.windows = windowResults
+    results.createdNodeIds = compactIds([
+      ...(results.createdNodeIds as string[]),
+      ...windowResults.map((result) => isRecordLike(result) ? result.windowId : undefined),
+    ])
+    results.createdByType = {
+      ...(results.createdByType as Record<string, string[]>),
+      window: compactIds(windowResults.map((result) => isRecordLike(result) ? result.windowId : undefined)),
+    }
   }
 
   // Add ceiling
@@ -439,6 +545,11 @@ function createRoom(args: Record<string, unknown>): string {
       createCeiling({ polygon: ceilingPolygon, height: ceilingHeight }),
     )
     results.ceiling = ceilingResult
+    results.createdNodeIds = compactIds([...(results.createdNodeIds as string[]), ceilingResult.ceilingId])
+    results.createdByType = {
+      ...(results.createdByType as Record<string, string[]>),
+      ceiling: compactIds([ceilingResult.ceilingId]),
+    }
   }
 
   return JSON.stringify(results)
@@ -489,6 +600,16 @@ function createZone(args: Record<string, unknown>): string {
     zoneId: zone.id,
     name,
     ...(roomType ? { roomType } : {}),
+    createdNodeIds: [zone.id],
+    createdByType: { zone: [zone.id] },
+    spatialContext: {
+      polygon,
+      bounds: polygonBounds(polygon),
+      area: polygonArea(polygon),
+      roomType: roomType ?? null,
+    },
+    usableBounds: polygonBounds(polygon),
+    suggestedNextTools: ['validate_scene', 'add_door_to_wall', 'add_window_to_wall'],
   })
 }
 
@@ -551,6 +672,9 @@ function createApartment(args: Record<string, unknown>): string {
   const maxRowWidth = (args.maxRowWidth as number) ?? 20
 
   const results: unknown[] = []
+  const allCreatedIds: string[] = []
+  const allByType: Record<string, string[]> = {}
+  const roomContexts: unknown[] = []
   let curX = origin[0]
   let curZ = origin[1]
   let rowMaxDepth = 0
@@ -591,6 +715,24 @@ function createApartment(args: Record<string, unknown>): string {
       }),
     )
 
+    const createdNodeIds = Array.isArray(roomResult.createdNodeIds) ? roomResult.createdNodeIds : []
+    const zoneIds = compactIds([zoneResult.zoneId])
+    allCreatedIds.push(...compactIds([...createdNodeIds, ...zoneIds]))
+    for (const [type, ids] of Object.entries({
+      ...(isRecordLike(roomResult.createdByType) ? roomResult.createdByType : {}),
+      zone: zoneIds,
+    })) {
+      allByType[type] = [...(allByType[type] ?? []), ...compactIds(Array.isArray(ids) ? ids : [])]
+    }
+    roomContexts.push({
+      name: room.name,
+      roomType: room.roomType ?? null,
+      slabId: isRecordLike(roomResult.slab) ? roomResult.slab.slabId : undefined,
+      zoneId: zoneResult.zoneId,
+      spatialContext: roomResult.spatialContext,
+      candidateWalls: roomResult.candidateWalls,
+    })
+
     results.push({
       room: room.name,
       ...roomResult,
@@ -605,6 +747,14 @@ function createApartment(args: Record<string, unknown>): string {
     success: true,
     roomCount: rooms.length,
     rooms: results,
+    createdNodeIds: allCreatedIds,
+    createdByType: allByType,
+    spatialContext: {
+      origin,
+      maxRowWidth,
+      rooms: roomContexts,
+    },
+    suggestedNextTools: ['validate_scene', 'add_window_to_wall', 'auto_align_windows', 'place_in_room'],
   })
 }
 
@@ -743,7 +893,7 @@ function getSceneInfo(): string {
   const doors: Array<{ id: string; parentWallId: unknown; width?: unknown; height?: unknown }> = []
   const windows: Array<{ id: string; parentWallId: unknown; width?: unknown; height?: unknown }> = []
   const ceilings: Array<{ id: string; height?: unknown }> = []
-  const zones: Array<{ id: string; name: unknown; color?: unknown }> = []
+  const zones: Array<{ id: string; name: unknown; color?: unknown; roomType?: unknown }> = []
   const roofs: Array<{ id: string; roofType?: unknown }> = []
   const items: Array<{ id: string; name: string; catalogId: string; position: unknown; attachTo?: string; parentId?: unknown }> = []
 
@@ -769,7 +919,8 @@ function getSceneInfo(): string {
       ceilings.push({ id: c.id, height: c.height })
     } else if (node.type === 'zone') {
       const z = node as unknown as { id: string; name: unknown; color?: unknown }
-      zones.push({ id: z.id, name: z.name, color: z.color })
+      const metadata = (node as unknown as { metadata?: { roomType?: unknown } }).metadata
+      zones.push({ id: z.id, name: z.name, color: z.color, roomType: metadata?.roomType })
     } else if (node.type === 'roof') {
       roofs.push({ id: node.id })
     } else if (node.type === 'item') {
@@ -808,6 +959,10 @@ function getSceneInfo(): string {
     bounds: { minX: number; minZ: number; maxX: number; maxZ: number }
     area: number
     furniture: Array<{ id: string; name: string; catalogId: string }>
+    shortSide: number
+    roomType: unknown
+    windowCount: number
+    doorCount: number
   }> = []
 
   // Collect slab polygons for room detection
@@ -835,6 +990,7 @@ function getSceneInfo(): string {
 
     // Find zone name overlapping this slab
     let zoneName: string | null = null
+    let roomType: unknown = null
     for (const z of zones) {
       const zNode = nodes[z.id as AnyNodeId] as unknown as { polygon?: [number, number][] }
       if (zNode?.polygon) {
@@ -844,6 +1000,7 @@ function getSceneInfo(): string {
         ]
         if (pointInPolygonSimple(zCentroid[0]!, zCentroid[1]!, slab.polygon)) {
           zoneName = z.name as string
+          roomType = (z as { roomType?: unknown }).roomType ?? null
           break
         }
       }
@@ -855,13 +1012,52 @@ function getSceneInfo(): string {
       return pos && pointInPolygonSimple(pos[0], pos[2], slab.polygon)
     }).map((itm) => ({ id: itm.id, name: itm.name, catalogId: itm.catalogId }))
 
+    const slabWallIds = walls
+      .filter((wall) => {
+        const w = nodes[wall.id as AnyNodeId] as unknown as { start?: [number, number]; end?: [number, number] }
+        if (!w.start || !w.end) return false
+        return pointInPolygonSimple(w.start[0], w.start[1], slab.polygon) || pointInPolygonSimple(w.end[0], w.end[1], slab.polygon)
+      })
+      .map((wall) => wall.id)
+    const windowCount = windows.filter((window) => slabWallIds.includes(String(window.parentWallId))).length
+    const doorCount = doors.filter((door) => slabWallIds.includes(String(door.parentWallId))).length
+
     roomSummaries.push({
       slabId: slab.id,
       zoneName,
       bounds: { minX, minZ, maxX, maxZ },
       area,
       furniture: containedItems,
+      shortSide: round3(Math.min(maxX - minX, maxZ - minZ)),
+      roomType,
+      windowCount,
+      doorCount,
     })
+  }
+
+  const architecturalSummary = {
+    spaces: roomSummaries.map((room) => ({
+      slabId: room.slabId,
+      zoneName: room.zoneName,
+      roomType: room.roomType,
+      area: room.area,
+      shortSide: room.shortSide,
+      bounds: room.bounds,
+      doorCount: room.doorCount,
+      windowCount: room.windowCount,
+      needsOpeningAttention: room.doorCount === 0 || windowCountNeedsAttention(room.roomType, room.windowCount),
+    })),
+    openingCounts: {
+      doors: doors.length,
+      windows: windows.length,
+    },
+    exteriorWallCandidates: walls
+      .filter((wall) => Number(wall.length) >= 1.2)
+      .slice(0, 12)
+      .map((wall) => ({ id: wall.id, length: wall.length, start: wall.start, end: wall.end })),
+    suggestedNextTools: roomSummaries.length === 0
+      ? ['create_room', 'create_apartment', 'create_polygon_room']
+      : ['validate_scene', 'add_door_to_wall', 'add_window_to_wall', 'auto_align_windows', 'place_in_room'],
   }
 
   // Summary counts + details
@@ -881,6 +1077,16 @@ function getSceneInfo(): string {
       isEmpty: walls.length === 0 && slabs.length === 0,
     },
     allLevels,
+    architecturalSummary,
+    lastValidation: lastValidationReport
+      ? {
+          codeProfile: lastValidationReport.codeProfile,
+          blocking: lastValidationReport.blocking,
+          blockingRuleIds: lastValidationReport.blockingRuleIds,
+          ruleSummary: lastValidationReport.ruleSummary,
+          repairHints: lastValidationReport.repairHints,
+        }
+      : null,
     roomSummaries,
     wallDetails: walls,
     doorDetails: doors,
@@ -903,6 +1109,11 @@ function isChildOfLevel(
   const parent = nodes[node.parentId as AnyNodeId]
   if (!parent) return false
   return parent.parentId === levelId
+}
+
+function windowCountNeedsAttention(roomType: unknown, windowCount: number): boolean {
+  if (typeof roomType !== 'string') return windowCount === 0
+  return ['bedroom', 'living', 'kitchen', 'bathroom'].includes(roomType) && windowCount === 0
 }
 
 function deleteNode(args: Record<string, unknown>): string {
@@ -1194,12 +1405,42 @@ function createPolygonRoom(args: Record<string, unknown>): string {
   const results: Record<string, unknown> = {
     success: true,
     walls: wallResult,
+    createdNodeIds: compactIds(Array.isArray(wallResult.wallIds) ? wallResult.wallIds : []),
+    createdByType: createdByType({
+      wall: Array.isArray(wallResult.wallIds) ? wallResult.wallIds : [],
+    }),
+    spatialContext: {
+      polygon,
+      bounds: polygonBounds(polygon),
+      area: polygonArea(polygon),
+      edges: polygon.map((point, index) => {
+        const next = polygon[(index + 1) % polygon.length]!
+        return {
+          index,
+          wallId: Array.isArray(wallResult.wallIds) ? wallResult.wallIds[index] : undefined,
+          start: point,
+          end: next,
+          length: round3(Math.sqrt((next[0] - point[0]) ** 2 + (next[1] - point[1]) ** 2)),
+        }
+      }),
+    },
+    candidateWalls: polygon.map((_point, index) => ({
+      index,
+      wallId: Array.isArray(wallResult.wallIds) ? wallResult.wallIds[index] : undefined,
+    })),
+    suggestedNextTools: ['create_zone', 'add_door_to_wall', 'add_window_to_wall', 'validate_scene'],
   }
 
   // Create floor slab
   if (addSlab) {
     const slabResult = JSON.parse(createSlab({ polygon }))
     results.slab = slabResult
+    results.createdNodeIds = compactIds([...(results.createdNodeIds as string[]), slabResult.slabId])
+    results.createdByType = {
+      ...(results.createdByType as Record<string, string[]>),
+      slab: compactIds([slabResult.slabId]),
+    }
+    results.usableBounds = polygonBounds(polygon)
   }
 
   // Add door on specified edge
@@ -1208,6 +1449,11 @@ function createPolygonRoom(args: Record<string, unknown>): string {
       createDoor({ wallIndex: doorEdgeIndex, position_t: 0.5 }),
     )
     results.door = doorResult
+    results.createdNodeIds = compactIds([...(results.createdNodeIds as string[]), doorResult.doorId])
+    results.createdByType = {
+      ...(results.createdByType as Record<string, string[]>),
+      door: compactIds([doorResult.doorId]),
+    }
   }
 
   // Create zone if name provided
@@ -1216,6 +1462,11 @@ function createPolygonRoom(args: Record<string, unknown>): string {
       createZone({ name: zoneName, polygon, color: zoneColor, roomType: zoneRoomType }),
     )
     results.zone = zoneResult
+    results.createdNodeIds = compactIds([...(results.createdNodeIds as string[]), zoneResult.zoneId])
+    results.createdByType = {
+      ...(results.createdByType as Record<string, string[]>),
+      zone: compactIds([zoneResult.zoneId]),
+    }
   }
 
   return JSON.stringify(results)
@@ -1328,6 +1579,15 @@ function placeFurniture(args: Record<string, unknown>): string {
     insideSlabId: insideRoom,
     collisions: collisions.length > 0 ? collisions : undefined,
     warning: warnings.length > 0 ? warnings.join(' | ') : undefined,
+    createdNodeIds: [item.id],
+    createdByType: { item: [item.id] },
+    spatialContext: {
+      bbox,
+      insideSlabId: insideRoom,
+      collisions,
+    },
+    usableBounds: bbox,
+    suggestedNextTools: warnings.length > 0 ? ['move_nodes', 'validate_scene'] : ['validate_scene', 'place_in_room', 'place_against_wall'],
   })
 }
 
@@ -2578,7 +2838,13 @@ function placeCeilingItem(args: Record<string, unknown>): string {
 function validateScene(args: Record<string, unknown> = {}): string {
   const levelId = getLevelId()
   const result = validateAndCorrectScene(levelId, args.codeProfile as string | undefined)
-  return formatValidationReport(result)
+  const report = formatValidationReport(result)
+  try {
+    lastValidationReport = JSON.parse(report) as Record<string, unknown>
+  } catch {
+    lastValidationReport = null
+  }
+  return report
 }
 
 function autoAlignWindows(args: Record<string, unknown>): string {

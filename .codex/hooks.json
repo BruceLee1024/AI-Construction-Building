@@ -1,0 +1,66 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/devlog-hook.mjs\" SessionStart",
+            "timeout": 10,
+            "statusMessage": "Opening local development log"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Read|Edit|MultiEdit|Write|Grep|Glob|LS|TodoWrite|WebFetch|WebSearch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/devlog-hook.mjs\" PostToolUse",
+            "timeout": 10,
+            "statusMessage": "Recording development fact"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/devlog-hook.mjs\" Stop",
+            "timeout": 20,
+            "statusMessage": "Writing development handoff"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/devlog-hook.mjs\" PreCompact",
+            "timeout": 20,
+            "statusMessage": "Preserving compact session state"
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$(git rev-parse --show-toplevel)/.codex/hooks/devlog-hook.mjs\" PostCompact",
+            "timeout": 20,
+            "statusMessage": "Recording compacted context"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -46,3 +46,7 @@ yarn-error.log*
 og-test
 .env*.local
 RESEARCH_REPORT.md
+
+# Local Codex development logs
+.codex/devlog/*
+!.codex/devlog/.gitignore

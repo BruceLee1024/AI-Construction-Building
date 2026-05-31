@@ -4,6 +4,9 @@ import { SYSTEM_PROMPT } from '../lib/agent/system-prompt'
 import { agentTools } from '../lib/agent/tools'
 import { executeToolCall } from '../lib/agent/executor'
 
+type CodeProfileName = 'residential_default' | 'china_residential'
+type AgentPhase = 'layout' | 'openings' | 'validation_repair' | 'furnishing' | 'roof_detail'
+
 // Tools that modify the scene and should trigger auto-validation
 const SCENE_MODIFYING_TOOLS = new Set([
   'create_walls', 'create_slab', 'create_door', 'create_window', 'create_room',
@@ -48,6 +51,29 @@ export interface ValidationSnapshot {
   }>
   nextAction?: string
   issueSummary?: Record<string, number>
+  ruleSummary?: Record<string, number>
+  blockingRuleIds?: string[]
+  repairHints?: RepairHint[]
+}
+
+export interface RepairHint {
+  ruleId: string
+  nodeId: string
+  preferredTools: string[]
+  suggestedAction: string
+  targetMetrics?: Record<string, number | string>
+}
+
+export interface AgentRunPolicy {
+  codeProfile: CodeProfileName
+  phase: AgentPhase
+  isComplex: boolean
+  isResidential: boolean
+  isMultiLevel: boolean
+  includesFurnishing: boolean
+  allowsRapidConcept: boolean
+  allowedNextTools: string[]
+  deferredTools: string[]
 }
 
 export type AIProvider = 'openai' | 'deepseek' | 'xiaomi'
@@ -129,6 +155,58 @@ function allowsRapidConcept(content: string): boolean {
   return /快速|草图|概念|随便|rough|quick|draft|concept/.test(normalized)
 }
 
+export function resolveAgentRunPolicy(
+  userContent: string,
+  lastValidation: ValidationSnapshot | null = null,
+): AgentRunPolicy {
+  const normalized = userContent.toLowerCase()
+  const isChineseResidential = /中文|中国|国标|住宅|公寓|户型|两居|三居|卧室|客厅|厨房|卫生间|阳台/.test(userContent)
+  const isResidential = isChineseResidential || /residential|apartment|house|home|bedroom|living|kitchen|bathroom/.test(normalized)
+  const isMultiLevel = /多层|楼层|加层|二层|三层|multi-story|multistory|floor|level|second floor|third floor/.test(normalized)
+  const includesFurnishing = /家具|软装|装修|摆放|沙发|床|furnish|furniture|sofa|bed|decor/.test(normalized)
+  const includesRoofOrDetail = /屋顶|屋面|roof|detail|decoration|装饰/.test(normalized)
+  const rapid = allowsRapidConcept(userContent)
+  const isComplex = isComplexGenerationRequest(userContent)
+
+  let phase: AgentPhase = 'layout'
+  if (lastValidation?.blocking) {
+    phase = 'validation_repair'
+  } else if (isComplex && !rapid) {
+    phase = 'layout'
+  } else if (includesRoofOrDetail) {
+    phase = 'roof_detail'
+  } else if (includesFurnishing) {
+    phase = 'furnishing'
+  } else if (isResidential || isComplex) {
+    phase = 'openings'
+  }
+
+  const repairTools = ['modify_node', 'move_nodes', 'batch_modify_nodes', 'add_door_to_wall', 'add_window_to_wall', 'auto_align_windows', 'delete_node', 'validate_scene']
+  const layoutTools = ['create_room', 'create_apartment', 'create_polygon_room', 'create_l_shaped_room', 'create_hallway', 'create_walls', 'create_slab', 'create_zone', 'validate_scene']
+  const openingTools = ['create_door', 'create_window', 'add_door_to_wall', 'add_window_to_wall', 'auto_align_windows', 'create_zone', 'validate_scene']
+  const furnishingTools = ['place_furniture', 'place_in_room', 'place_against_wall', 'furnish_room', 'place_wall_item', 'place_ceiling_item', 'validate_scene']
+  const roofTools = ['create_roof', 'create_ceiling', 'place_wall_item', 'place_ceiling_item', 'validate_scene']
+
+  const allowedNextTools =
+    phase === 'validation_repair' ? repairTools
+    : phase === 'furnishing' ? furnishingTools
+    : phase === 'roof_detail' ? roofTools
+    : phase === 'openings' ? [...openingTools, ...layoutTools]
+    : layoutTools
+
+  return {
+    codeProfile: isChineseResidential ? 'china_residential' : 'residential_default',
+    phase,
+    isComplex,
+    isResidential,
+    isMultiLevel,
+    includesFurnishing,
+    allowsRapidConcept: rapid,
+    allowedNextTools,
+    deferredTools: phase === 'validation_repair' ? Array.from(POST_LAYOUT_TOOLS) : [],
+  }
+}
+
 function parseValidationSnapshot(raw: string): ValidationSnapshot | null {
   try {
     const parsed = JSON.parse(raw) as Partial<ValidationSnapshot>
@@ -140,76 +218,52 @@ function parseValidationSnapshot(raw: string): ValidationSnapshot | null {
       issues: Array.isArray(parsed.issues) ? parsed.issues : [],
       nextAction: parsed.nextAction,
       issueSummary: parsed.issueSummary,
+      ruleSummary: parsed.ruleSummary,
+      blockingRuleIds: parsed.blockingRuleIds,
+      repairHints: Array.isArray(parsed.repairHints) ? parsed.repairHints : [],
     }
   } catch {
     return null
   }
 }
 
-function buildValidationMessage(snapshot: ValidationSnapshot): string {
-  const lines: string[] = ['[Spatial Auto-Validation Report]']
-  lines.push(`Status: ${snapshot.valid ? 'passed' : 'needs fixes'} | Auto-fixed: ${snapshot.fixedCount} | Warnings: ${snapshot.warningCount}`)
-
-  if (snapshot.issueSummary && Object.keys(snapshot.issueSummary).length > 0) {
-    lines.push(`Issue summary: ${Object.entries(snapshot.issueSummary).map(([type, count]) => `${type}=${count}`).join(', ')}`)
+function buildValidationMessage(snapshot: ValidationSnapshot, policy: AgentRunPolicy): string {
+  const payload = {
+    type: 'spatial_validation',
+    codeProfile: policy.codeProfile,
+    phase: snapshot.blocking ? 'validation_repair' : policy.phase,
+    valid: snapshot.valid,
+    blocking: snapshot.blocking,
+    fixedCount: snapshot.fixedCount,
+    warningCount: snapshot.warningCount,
+    blockingRuleIds: snapshot.blockingRuleIds ?? [],
+    ruleSummary: snapshot.ruleSummary ?? {},
+    repairHints: (snapshot.repairHints ?? []).slice(0, 8),
+    allowedNextTools: snapshot.blocking ? policy.allowedNextTools : undefined,
+    nextAction: snapshot.nextAction ?? (snapshot.blocking
+      ? 'Use repairHints with the allowed repair tools, then validate again before furniture/roof/detail work.'
+      : 'Validation passed; continue to the next staged generation phase.'),
   }
 
-  if (snapshot.issues.length > 0) {
-    lines.push('')
-    for (const issue of snapshot.issues.slice(0, 12)) {
-      const icon = issue.severity === 'fixed' ? '🔧' : issue.type === 'code' ? '📐' : '⚠️'
-      lines.push(`${icon} [${issue.type}] ${issue.message}`)
-    }
-    if (snapshot.issues.length > 12) {
-      lines.push(`... ${snapshot.issues.length - 12} more issues omitted; use issueSummary and blockingIssues first.`)
-    }
-  }
-
-  lines.push('')
-  lines.push(snapshot.nextAction ?? (snapshot.blocking
-    ? 'Next action: fix the warnings before moving to the next generation phase.'
-    : 'Next action: validation passed; continue to the next staged phase.'))
-
-  if (snapshot.issues.length > 0) {
-    lines.push('')
-    lines.push('Tips to avoid these issues:')
-    if (snapshot.issues.some((i) => i.type === 'bounds')) {
-      lines.push('- Furniture placement: ensure position is inside the room slab polygon. Use interiorBounds from createRoom result.')
-    }
-    if (snapshot.issues.some((i) => i.type === 'snap')) {
-      lines.push('- Wall endpoints: adjacent walls should share exact coordinates. Use the same [x,z] for connected corners.')
-    }
-    if (snapshot.issues.some((i) => i.type === 'gap')) {
-      lines.push('- Wall gaps detected: check that wall endpoints form a closed loop with no small gaps.')
-    }
-    if (snapshot.issues.some((i) => i.type === 'overlap')) {
-      lines.push('- Overlaps: ensure doors/windows do not collide on the same wall, and furniture is spaced out to avoid collision.')
-    }
-    if (snapshot.issues.some((i) => i.type === 'info')) {
-      lines.push('- Design advice: Check daylight ratios, large spans, structural support, and wet-room ventilation.')
-    }
-    if (snapshot.issues.some((i) => i.type === 'code')) {
-      lines.push('- Building-code checks: Respect door/corridor clear widths, usable room proportions, daylight/ventilation, and upper-floor fall protection.')
-      lines.push('- Do not continue to furniture or roof detailing until code warnings from the structural/layout phase are resolved.')
-    }
-  }
-
-  return lines.join('\n')
+  return `[Spatial Auto-Validation JSON]\n${JSON.stringify(payload, null, 2)}`
 }
 
 export function stagedDeferralForTool(
   toolName: string,
   userContent: string,
   lastValidation: ValidationSnapshot | null,
+  policy: AgentRunPolicy = resolveAgentRunPolicy(userContent, lastValidation),
 ): Record<string, unknown> | null {
   if (
     ONE_SHOT_MACRO_TOOLS.has(toolName) &&
-    isComplexGenerationRequest(userContent) &&
-    !allowsRapidConcept(userContent)
+    policy.isComplex &&
+    !policy.allowsRapidConcept
   ) {
     return {
       deferred: true,
       tool: toolName,
+      phaseBlockedBy: policy.phase,
+      allowedNextTools: policy.allowedNextTools,
       reason:
         'This request is complex/code-sensitive, so one-shot macro generation is disabled. Build layout first, validate, then add openings, furniture, and details in later phases.',
       nextAction:
@@ -221,6 +275,10 @@ export function stagedDeferralForTool(
     return {
       deferred: true,
       tool: toolName,
+      phaseBlockedBy: 'validation_repair',
+      allowedNextTools: policy.allowedNextTools,
+      requiredRuleFixes: lastValidation.blockingRuleIds ?? [],
+      repairHints: (lastValidation.repairHints ?? []).slice(0, 5),
       reason:
         'The previous validation report still has warnings. Post-layout work is blocked until those warnings are fixed.',
       blockingIssues: lastValidation.issues
@@ -305,10 +363,11 @@ async function runAgentLoop(
 
   while (iteration < MAX_ITERATIONS) {
     iteration++
+    const runPolicy = resolveAgentRunPolicy(userContent, lastValidation)
 
     // Auto-inject current scene context so the AI always knows what exists
     const sceneContext = executeToolCall('get_scene_info', {})
-    const systemWithContext = `${SYSTEM_PROMPT}\n\n## Current Scene State\n${sceneContext}`
+    const systemWithContext = `${SYSTEM_PROMPT}\n\n## Agent Run Policy\n${JSON.stringify(runPolicy, null, 2)}\n\n## Current Scene State\n${sceneContext}`
 
     // Build messages for API
     const apiMessages: ChatCompletionMessageParam[] = [
@@ -371,7 +430,7 @@ async function runAgentLoop(
         const isSceneModifyingTool = SCENE_MODIFYING_TOOLS.has(tc.name)
         let result: string
         const stagedDeferral = isSceneModifyingTool
-          ? stagedDeferralForTool(tc.name, userContent, lastValidation)
+          ? stagedDeferralForTool(tc.name, userContent, lastValidation, runPolicy)
           : null
 
         if (stagedDeferral) {
@@ -383,6 +442,8 @@ async function runAgentLoop(
           result = JSON.stringify({
             deferred: true,
             tool: tc.name,
+            phaseBlockedBy: runPolicy.phase,
+            allowedNextTools: runPolicy.allowedNextTools,
             reason:
               'Scene generation is staged. Review the validation report from the previous modification, then call this tool again if it is still appropriate.',
             nextAction:
@@ -410,14 +471,14 @@ async function runAgentLoop(
 
       // Auto-validate after scene modifications
       if (hasSceneModification) {
-        const validationResult = executeToolCall('validate_scene', {})
+        const validationResult = executeToolCall('validate_scene', { codeProfile: runPolicy.codeProfile })
         const snapshot = parseValidationSnapshot(validationResult)
         if (snapshot) {
           lastValidation = snapshot
           const validationMsg: ChatMessage = {
             id: genId(),
             role: 'system',
-            content: buildValidationMessage(snapshot),
+            content: buildValidationMessage(snapshot, resolveAgentRunPolicy(userContent, snapshot)),
           }
           set((s) => ({
             messages: [...s.messages, validationMsg],

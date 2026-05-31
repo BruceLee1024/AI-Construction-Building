@@ -26,6 +26,32 @@ export type ToolResultFieldAssertion = {
   expected: JsonValue | FieldMatch
 }
 
+export type ToolResultIncludesSuggestionsAssertion = {
+  type: 'toolResult.includesSuggestions'
+  step: number
+  tools: string[]
+}
+
+export type AgentPolicyAssertion = {
+  type: 'agent.policy'
+  userContent: string
+  codeProfile?: string
+  phase?: string
+  isComplex?: boolean
+  includesFurnishing?: boolean
+}
+
+export type AgentDeferralAssertion = {
+  type: 'agent.deferral'
+  toolName: string
+  userContent: string
+  lastValidation?: Record<string, JsonValue>
+  deferred?: boolean
+  phaseBlockedBy?: string
+  mustIncludeAllowedTools?: string[]
+  mustIncludeRuleIds?: string[]
+}
+
 export type NodeCountAssertion = {
   type: 'node.count'
   nodeType: string
@@ -58,6 +84,12 @@ export type ValidationAssertion = {
   mustIncludeRuleIds?: string[]
   mustExcludeRuleIds?: string[]
   codeProfile?: string
+}
+
+export type ValidationRepairHintsAssertion = {
+  type: 'validation.repairHints'
+  mustIncludeRuleIds: string[]
+  mustIncludePreferredTools?: string[]
 }
 
 export type MinClearanceAssertion = {
@@ -94,12 +126,16 @@ export type FieldMatch = {
 export type HarnessAssertion =
   | ToolResultSuccessAssertion
   | ToolResultFieldAssertion
+  | ToolResultIncludesSuggestionsAssertion
+  | AgentPolicyAssertion
+  | AgentDeferralAssertion
   | NodeCountAssertion
   | NodeExistsAssertion
   | ClosedWallsAssertion
   | MinClearanceAssertion
   | NoSlabOverlapAssertion
   | OpeningsFitWallAssertion
+  | ValidationRepairHintsAssertion
   | ValidationAssertion
 
 export interface HarnessCase {

@@ -3,7 +3,7 @@ import path from 'node:path'
 import useScene, { clearSceneHistory } from '@pascal-app/core'
 import type { AnyNode } from '@pascal-app/core'
 import { executeToolCall } from '../../packages/editor/src/lib/agent/executor'
-import { stagedDeferralForTool } from '../../packages/editor/src/store/use-agent'
+import { resolveAgentRunPolicy, stagedDeferralForTool } from '../../packages/editor/src/store/use-agent'
 import {
   assertHarnessCase,
   getByPath,
@@ -220,6 +220,12 @@ function evaluateAssertion(
       return assertToolResultSuccess(assertion.step, assertion.expected ?? true, steps)
     case 'toolResult.field':
       return assertToolResultField(assertion, steps)
+    case 'toolResult.includesSuggestions':
+      return assertToolResultIncludesSuggestions(assertion, steps)
+    case 'agent.policy':
+      return assertAgentPolicy(assertion)
+    case 'agent.deferral':
+      return assertAgentDeferral(assertion)
     case 'node.count':
       return assertNodeCount(assertion)
     case 'node.exists':
@@ -232,6 +238,8 @@ function evaluateAssertion(
       return assertNoSlabOverlap()
     case 'geometry.openingsFitWall':
       return assertOpeningsFitWall()
+    case 'validation.repairHints':
+      return assertValidationRepairHints(assertion, validation)
     case 'validation':
       return assertValidation(assertion, validation)
     default:
@@ -279,6 +287,82 @@ function assertToolResultField(
     pass,
     type: 'toolResult.field',
     message: `step ${assertion.step} field ${assertion.path} expected ${JSON.stringify(assertion.expected)}, received ${JSON.stringify(actual)}`,
+  }
+}
+
+function assertToolResultIncludesSuggestions(
+  assertion: Extract<HarnessAssertion, { type: 'toolResult.includesSuggestions' }>,
+  steps: StepResult[],
+): AssertionResult {
+  const step = steps[assertion.step]
+  const suggestions = getByPath(step?.parsed, 'suggestedNextTools')
+  const failures: string[] = []
+  if (!Array.isArray(suggestions)) {
+    failures.push('suggestedNextTools was not an array')
+  } else {
+    for (const tool of assertion.tools) {
+      if (!suggestions.includes(tool)) failures.push(`missing suggested tool ${tool}`)
+    }
+  }
+  return {
+    pass: failures.length === 0,
+    type: 'toolResult.includesSuggestions',
+    message: failures.length === 0 ? 'suggested tools matched' : failures.join('; '),
+  }
+}
+
+function assertAgentPolicy(
+  assertion: Extract<HarnessAssertion, { type: 'agent.policy' }>,
+): AssertionResult {
+  const policy = resolveAgentRunPolicy(assertion.userContent)
+  const failures: string[] = []
+  if (assertion.codeProfile !== undefined && policy.codeProfile !== assertion.codeProfile) {
+    failures.push(`codeProfile expected ${assertion.codeProfile}, received ${policy.codeProfile}`)
+  }
+  if (assertion.phase !== undefined && policy.phase !== assertion.phase) {
+    failures.push(`phase expected ${assertion.phase}, received ${policy.phase}`)
+  }
+  if (assertion.isComplex !== undefined && policy.isComplex !== assertion.isComplex) {
+    failures.push(`isComplex expected ${assertion.isComplex}, received ${policy.isComplex}`)
+  }
+  if (assertion.includesFurnishing !== undefined && policy.includesFurnishing !== assertion.includesFurnishing) {
+    failures.push(`includesFurnishing expected ${assertion.includesFurnishing}, received ${policy.includesFurnishing}`)
+  }
+  return {
+    pass: failures.length === 0,
+    type: 'agent.policy',
+    message: failures.length === 0 ? 'agent policy matched' : failures.join('; '),
+  }
+}
+
+function assertAgentDeferral(
+  assertion: Extract<HarnessAssertion, { type: 'agent.deferral' }>,
+): AssertionResult {
+  const lastValidation = isRecord(assertion.lastValidation)
+    ? assertion.lastValidation as unknown as Parameters<typeof stagedDeferralForTool>[2]
+    : null
+  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation)
+  const result = stagedDeferralForTool(assertion.toolName, assertion.userContent, lastValidation, policy)
+  const failures: string[] = []
+  const expectedDeferred = assertion.deferred ?? true
+  if (Boolean(result?.deferred) !== expectedDeferred) {
+    failures.push(`deferred expected ${expectedDeferred}, received ${Boolean(result?.deferred)}`)
+  }
+  if (assertion.phaseBlockedBy !== undefined && result?.phaseBlockedBy !== assertion.phaseBlockedBy) {
+    failures.push(`phaseBlockedBy expected ${assertion.phaseBlockedBy}, received ${String(result?.phaseBlockedBy)}`)
+  }
+  const allowedTools = Array.isArray(result?.allowedNextTools) ? result.allowedNextTools : []
+  for (const tool of assertion.mustIncludeAllowedTools ?? []) {
+    if (!allowedTools.includes(tool)) failures.push(`allowedNextTools missing ${tool}`)
+  }
+  const requiredRuleFixes = Array.isArray(result?.requiredRuleFixes) ? result.requiredRuleFixes : []
+  for (const ruleId of assertion.mustIncludeRuleIds ?? []) {
+    if (!requiredRuleFixes.includes(ruleId)) failures.push(`requiredRuleFixes missing ${ruleId}`)
+  }
+  return {
+    pass: failures.length === 0,
+    type: 'agent.deferral',
+    message: failures.length === 0 ? 'agent deferral matched' : failures.join('; '),
   }
 }
 
@@ -484,6 +568,39 @@ function assertValidation(
     pass: failures.length === 0,
     type: 'validation',
     message: failures.length === 0 ? 'validation matched expectations' : failures.join('; '),
+  }
+}
+
+function assertValidationRepairHints(
+  assertion: Extract<HarnessAssertion, { type: 'validation.repairHints' }>,
+  validation: unknown,
+): AssertionResult {
+  if (!isRecord(validation) || !Array.isArray(validation.repairHints)) {
+    return { pass: false, type: 'validation.repairHints', message: 'validation.repairHints was not an array' }
+  }
+
+  const failures: string[] = []
+  const hints = validation.repairHints.filter(isRecord)
+  const ruleIds = new Set(hints.map((hint) => hint.ruleId).filter((ruleId): ruleId is string => typeof ruleId === 'string'))
+  const preferredTools = new Set<string>()
+  for (const hint of hints) {
+    if (!Array.isArray(hint.preferredTools)) continue
+    for (const tool of hint.preferredTools) {
+      if (typeof tool === 'string') preferredTools.add(tool)
+    }
+  }
+
+  for (const ruleId of assertion.mustIncludeRuleIds) {
+    if (!ruleIds.has(ruleId)) failures.push(`repairHints missing ruleId ${ruleId}`)
+  }
+  for (const tool of assertion.mustIncludePreferredTools ?? []) {
+    if (!preferredTools.has(tool)) failures.push(`repairHints missing preferred tool ${tool}`)
+  }
+
+  return {
+    pass: failures.length === 0,
+    type: 'validation.repairHints',
+    message: failures.length === 0 ? 'repair hints matched expectations' : failures.join('; '),
   }
 }
 

@@ -486,14 +486,7 @@ export const agentTools: ChatCompletionTool[] = [
       description: 'Undo the last scene change. Can be called multiple times to undo multiple steps.',
       parameters: {
         type: 'object',
-        properties: {
-          codeProfile: {
-            type: 'string',
-            enum: ['residential_default', 'china_residential'],
-            description:
-              'Optional building-rule profile. Defaults to residential_default; use china_residential for Chinese residential layouts.',
-          },
-        },
+        properties: {},
         required: [],
       },
     },
@@ -1404,7 +1397,14 @@ export const agentTools: ChatCompletionTool[] = [
         'Validate and auto-correct spatial issues on the current level. Fixes: wall endpoint gaps (snaps within 5cm), furniture outside room boundaries (nudges inside), door/window overflows (clamps position). Reports warnings for wall gaps, overlaps, circulation, simplified building-code guardrails, daylight/ventilation, door widths, corridor widths, room proportions, and upper-floor fall hazards. Auto-runs after every scene modification, but can be called manually to inspect before continuing.',
       parameters: {
         type: 'object',
-        properties: {},
+        properties: {
+          codeProfile: {
+            type: 'string',
+            enum: ['residential_default', 'china_residential'],
+            description:
+              'Optional building-rule profile. Defaults to residential_default; use china_residential for Chinese residential layouts.',
+          },
+        },
         required: [],
       },
     },

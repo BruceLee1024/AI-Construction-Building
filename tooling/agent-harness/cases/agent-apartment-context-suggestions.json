@@ -1,0 +1,23 @@
+{
+  "name": "agent-apartment-context-suggestions",
+  "description": "Apartment generation returns structured node IDs and next-tool suggestions for staged LLM planning.",
+  "steps": [
+    {
+      "tool": "create_apartment",
+      "args": {
+        "origin": [0, 0],
+        "rooms": [
+          { "name": "Living", "width": 5, "depth": 4, "hasDoor": true, "hasWindow": true, "roomType": "living" },
+          { "name": "Bedroom", "width": 3.5, "depth": 3.2, "hasDoor": true, "hasWindow": true, "roomType": "bedroom" }
+        ]
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 0 },
+    { "type": "toolResult.field", "step": 0, "path": "createdNodeIds", "expected": { "notNull": true } },
+    { "type": "toolResult.field", "step": 0, "path": "createdByType.wall", "expected": { "notNull": true } },
+    { "type": "toolResult.field", "step": 0, "path": "spatialContext.rooms.0.roomType", "expected": "living" },
+    { "type": "toolResult.includesSuggestions", "step": 0, "tools": ["validate_scene", "add_window_to_wall"] }
+  ]
+}

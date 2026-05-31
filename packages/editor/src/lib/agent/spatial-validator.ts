@@ -14,6 +14,14 @@ interface ValidationIssue {
   message: string
 }
 
+export interface RepairHint {
+  ruleId: string
+  nodeId: string
+  preferredTools: string[]
+  suggestedAction: string
+  targetMetrics?: Record<string, number | string>
+}
+
 interface ValidationResult {
   issues: ValidationIssue[]
   fixedCount: number
@@ -1458,6 +1466,7 @@ export function formatValidationReport(result: ValidationResult): string {
   const blockingRuleIds = Array.from(new Set(result.issues
     .filter((i) => i.severity === 'warning' && (i.type === 'code' || i.type === 'bounds' || i.type === 'gap' || i.type === 'overlap'))
     .map((i) => i.ruleId)))
+  const repairHints = buildRepairHints(result.issues)
 
   if (result.issues.length === 0) {
     return JSON.stringify({
@@ -1470,6 +1479,7 @@ export function formatValidationReport(result: ValidationResult): string {
       issueSummary: {},
       ruleSummary: {},
       blockingRuleIds: [],
+      repairHints: [],
       issues: [],
       message: 'No spatial or building-code issues found',
       nextAction: 'Continue to the next staged generation phase.',
@@ -1486,6 +1496,7 @@ export function formatValidationReport(result: ValidationResult): string {
     issueSummary,
     ruleSummary,
     blockingRuleIds,
+    repairHints,
     issues: result.issues.map((i) => ({
       type: i.type,
       severity: i.severity,
@@ -1497,4 +1508,105 @@ export function formatValidationReport(result: ValidationResult): string {
       ? 'Fix blocking warnings before continuing to furniture, roof, decoration, or finalization.'
       : 'Only informational issues remain; continue to the next staged generation phase.',
   })
+}
+
+function buildRepairHints(issues: ValidationIssue[]): RepairHint[] {
+  const hints = new Map<string, RepairHint>()
+
+  for (const issue of issues) {
+    if (!(issue.severity === 'warning' && (issue.type === 'code' || issue.type === 'bounds' || issue.type === 'gap' || issue.type === 'overlap'))) {
+      continue
+    }
+    const hint = repairHintForIssue(issue)
+    hints.set(`${hint.ruleId}:${hint.nodeId}`, hint)
+  }
+
+  return Array.from(hints.values())
+}
+
+function repairHintForIssue(issue: ValidationIssue): RepairHint {
+  switch (issue.ruleId) {
+    case 'door.clear_width':
+      return {
+        ruleId: issue.ruleId,
+        nodeId: issue.nodeId,
+        preferredTools: ['modify_node'],
+        suggestedAction: 'Increase the door width to meet the clear-width threshold.',
+        targetMetrics: { minWidthMeters: 0.8 },
+      }
+    case 'corridor.min_width':
+    case 'circulation.entry_clear_width':
+      return {
+        ruleId: issue.ruleId,
+        nodeId: issue.nodeId,
+        preferredTools: ['move_nodes', 'modify_node', 'create_hallway'],
+        suggestedAction: 'Widen the circulation space or recreate the hallway/entry with a larger clear width.',
+        targetMetrics: { minClearWidthMeters: 1.1 },
+      }
+    case 'room.daylight_ratio':
+    case 'room.main_space_daylight':
+      return {
+        ruleId: issue.ruleId,
+        nodeId: issue.nodeId,
+        preferredTools: ['add_window_to_wall', 'auto_align_windows', 'create_window'],
+        suggestedAction: 'Add or enlarge exterior windows for this main room before furnishing.',
+        targetMetrics: { minDaylightRatio: 0.1 },
+      }
+    case 'room.has_door':
+      return {
+        ruleId: issue.ruleId,
+        nodeId: issue.nodeId,
+        preferredTools: ['add_door_to_wall', 'create_door'],
+        suggestedAction: 'Add a usable door to the room boundary.',
+      }
+    case 'geometry.slab_overlap':
+      return {
+        ruleId: issue.ruleId,
+        nodeId: issue.nodeId,
+        preferredTools: ['move_nodes', 'delete_node', 'create_room', 'create_polygon_room'],
+        suggestedAction: 'Move or recreate the overlapping room slabs so they are adjacent or separated, not overlapping.',
+      }
+    case 'opening.overlap':
+    case 'opening.edge_clearance':
+    case 'opening.min_spacing':
+      return {
+        ruleId: issue.ruleId,
+        nodeId: issue.nodeId,
+        preferredTools: ['modify_node', 'move_nodes', 'auto_align_windows', 'add_window_to_wall'],
+        suggestedAction: 'Move openings away from wall ends and each other, or use auto alignment on suitable exterior walls.',
+        targetMetrics: { minEdgeClearanceMeters: 0.25, minOpeningSpacingMeters: 0.25 },
+      }
+    case 'furniture.door_clearance':
+    case 'circulation.furniture_clear_path':
+      return {
+        ruleId: issue.ruleId,
+        nodeId: issue.nodeId,
+        preferredTools: ['move_nodes', 'place_in_room', 'place_against_wall'],
+        suggestedAction: 'Move furniture away from doors and circulation paths before continuing decoration.',
+        targetMetrics: { minClearanceMeters: 0.65 },
+      }
+    case 'room.kitchen_ventilation':
+    case 'room.bathroom_ventilation':
+      return {
+        ruleId: issue.ruleId,
+        nodeId: issue.nodeId,
+        preferredTools: ['add_window_to_wall', 'auto_align_windows', 'create_window'],
+        suggestedAction: 'Add an exterior window or ventilation opening for the wet/service room.',
+      }
+    case 'window.fall_protection':
+      return {
+        ruleId: issue.ruleId,
+        nodeId: issue.nodeId,
+        preferredTools: ['modify_node'],
+        suggestedAction: 'Raise the sill height or change the window dimensions before treating the model as code-ready.',
+        targetMetrics: { minSillHeightMeters: 0.9 },
+      }
+    default:
+      return {
+        ruleId: issue.ruleId,
+        nodeId: issue.nodeId,
+        preferredTools: ['modify_node', 'move_nodes'],
+        suggestedAction: 'Adjust the referenced geometry or metadata, then validate again before moving to the next phase.',
+      }
+  }
 }
