@@ -2,7 +2,7 @@
   "name": "editor",
   "private": true,
   "scripts": {
-    "agent:harness": "tsx --conditions=source tooling/agent-harness/run.ts",
+    "agent:harness": "node tooling/agent-harness/bootstrap.mjs",
     "build": "turbo run build",
     "dev": "set -a && . ./.env 2>/dev/null; set +a; turbo run dev --env-mode=loose",
     "lint": "biome lint",
@@ -29,7 +29,6 @@
     "@biomejs/biome": "^2.4.6",
     "dotenv-cli": "^11.0.0",
     "turbo": "^2.8.15",
-    "tsx": "^4.22.4",
     "typescript": "5.9.3",
     "ultracite": "^7.2.5"
   },

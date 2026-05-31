@@ -1,5 +1,5 @@
 export * from './schema'
-export { clearSceneHistory, default as useScene } from './store/use-scene'
+export { clearSceneHistory, default, default as useScene } from './store/use-scene'
 
 export function pointInPolygon(px: number, pz: number, polygon: Array<[number, number]>): boolean {
   let inside = false
