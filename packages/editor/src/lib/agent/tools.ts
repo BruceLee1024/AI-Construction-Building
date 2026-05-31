@@ -715,7 +715,7 @@ export const agentTools: ChatCompletionTool[] = [
     function: {
       name: 'place_furniture',
       description:
-        'Place a furniture item from the catalog on the current level. Each item has a real 3D model. Available IDs: sofa, lounge-chair, livingroom-chair, stool, coffee-table, tv-stand, bookshelf, floor-lamp, ceiling-lamp, recessed-light, table-lamp, rectangular-carpet, round-carpet, indoor-plant, small-indoor-plant, cactus, double-bed, single-bed, bunkbed, bedside-table, closet, dresser, dining-table, dining-chair, office-table, office-chair, kitchen-counter, kitchen-cabinet, kitchen, stove, fridge, microwave, toilet, bathtub, bathroom-sink, shower-square, shower-angle, washing-machine, television, computer, stairs, column, piano, pool-table, coat-rack, trash-bin, picture, round-mirror, shelf. Use list_furniture to see all items with dimensions.',
+        'Low-level fallback: place a furniture item at exact coordinates. Prefer suggest_furniture_layout, place_furniture_solved, place_in_room, place_against_wall, or furnish_room so the solver can avoid walls, doors, windows, collisions, and circulation conflicts. Available IDs: sofa, lounge-chair, livingroom-chair, stool, coffee-table, tv-stand, bookshelf, floor-lamp, ceiling-lamp, recessed-light, table-lamp, rectangular-carpet, round-carpet, indoor-plant, small-indoor-plant, cactus, double-bed, single-bed, bunkbed, bedside-table, closet, dresser, dining-table, dining-chair, office-table, office-chair, kitchen-counter, kitchen-cabinet, kitchen, stove, fridge, microwave, toilet, bathtub, bathroom-sink, shower-square, shower-angle, washing-machine, television, computer, stairs, column, piano, pool-table, coat-rack, trash-bin, picture, round-mirror, shelf.',
       parameters: {
         type: 'object',
         properties: {
@@ -739,6 +739,95 @@ export const agentTools: ChatCompletionTool[] = [
           },
         },
         required: ['type'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'suggest_furniture_layout',
+      description:
+        'Solve furniture placement without creating nodes. Uses room/slab bounds, existing furniture, doors, windows, clearance zones, and room type to return feasible placements, scores, blocked zones, and structured rejection reasons. Use before placing furniture when layout quality matters.',
+      parameters: {
+        type: 'object',
+        properties: {
+          roomType: {
+            type: 'string',
+            enum: ['bedroom', 'living', 'kitchen', 'bathroom', 'dining', 'office', 'entryway', 'balcony', 'kids', 'laundry', 'gym', 'guest'],
+            description: 'Semantic room type used to choose default furniture and placement rules.',
+          },
+          items: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional catalog item IDs to solve. If omitted, defaults are chosen from roomType.',
+          },
+          slabId: {
+            type: 'string',
+            description: 'Preferred: slab ID for the room to furnish.',
+          },
+          roomOrigin: {
+            type: 'array',
+            items: { type: 'number' },
+            minItems: 2,
+            maxItems: 2,
+            description: 'Fallback room bottom-left [x, z] when slabId is not available.',
+          },
+          roomWidth: { type: 'number', description: 'Fallback room width in meters.' },
+          roomDepth: { type: 'number', description: 'Fallback room depth in meters.' },
+          wallThickness: {
+            type: 'number',
+            description: 'Wall thickness in meters for fallback room bounds (default: 0.15).',
+          },
+          codeProfile: {
+            type: 'string',
+            enum: ['residential_default', 'china_residential'],
+            description: 'Optional profile for clearance expectations. Defaults to residential_default.',
+          },
+        },
+        required: ['roomType'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'place_furniture_solved',
+      description:
+        'Create furniture using the deterministic spatial solver. It avoids room bounds, doors, windows, existing furniture, and circulation conflicts, and returns placements plus rejection reasons. Prefer this over raw place_furniture for multi-item or code-sensitive furnishing.',
+      parameters: {
+        type: 'object',
+        properties: {
+          roomType: {
+            type: 'string',
+            enum: ['bedroom', 'living', 'kitchen', 'bathroom', 'dining', 'office', 'entryway', 'balcony', 'kids', 'laundry', 'gym', 'guest'],
+            description: 'Semantic room type used to choose default furniture and placement rules.',
+          },
+          items: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional catalog item IDs to create. If omitted, defaults are chosen from roomType.',
+          },
+          slabId: { type: 'string', description: 'Preferred: slab ID for the room to furnish.' },
+          roomOrigin: {
+            type: 'array',
+            items: { type: 'number' },
+            minItems: 2,
+            maxItems: 2,
+            description: 'Fallback room bottom-left [x, z] when slabId is not available.',
+          },
+          roomWidth: { type: 'number', description: 'Fallback room width in meters.' },
+          roomDepth: { type: 'number', description: 'Fallback room depth in meters.' },
+          wallThickness: {
+            type: 'number',
+            description: 'Wall thickness in meters for fallback room bounds (default: 0.15).',
+          },
+          codeProfile: {
+            type: 'string',
+            enum: ['residential_default', 'china_residential'],
+            description: 'Optional profile for clearance expectations. Defaults to residential_default.',
+          },
+        },
+        required: ['roomType'],
       },
     },
   },

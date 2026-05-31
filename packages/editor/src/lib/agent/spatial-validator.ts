@@ -263,6 +263,13 @@ function validateFurnitureBounds(
     }
 
     if (!insideAnySlab) {
+      issues.push({
+        type: 'bounds',
+        severity: 'warning',
+        ruleId: 'furniture.out_of_room_bounds',
+        nodeId: item.id,
+        message: `Item "${item.asset.name}" was placed outside every room slab before auto-correction.`,
+      })
       // Find the nearest slab to nudge the item into
       let nearestSlab = slabs[0]!
       let nearestDist = Infinity
@@ -765,6 +772,80 @@ function validateFurnitureCollision(
           nodeId: a.id,
           message: `Furniture "${a.asset.name}" might be colliding with "${b.asset.name}"`,
         })
+      }
+    }
+  }
+}
+
+function validateFurnitureUseClearance(
+  items: ItemNode[],
+  walls: WallNode[],
+  nodes: Record<AnyNodeId, AnyNode>,
+  issues: ValidationIssue[],
+  profile: CodeProfile,
+): void {
+  const floorItems = items.filter(i => i.asset.attachTo !== 'wall' && i.asset.attachTo !== 'wall-side' && i.asset.attachTo !== 'ceiling')
+  const itemBoxes = floorItems.map((item) => {
+    const dim = getScaledDimensions(item)
+    return {
+      item,
+      bbox: {
+        minX: item.position[0] - dim[0] / 2,
+        minZ: item.position[2] - dim[2] / 2,
+        maxX: item.position[0] + dim[0] / 2,
+        maxZ: item.position[2] + dim[2] / 2,
+      },
+      useBox: {
+        minX: item.position[0] - dim[0] / 2 - profile.minFurnitureClearPath,
+        minZ: item.position[2] - dim[2] / 2 - profile.minFurnitureClearPath,
+        maxX: item.position[0] + dim[0] / 2 + profile.minFurnitureClearPath,
+        maxZ: item.position[2] + dim[2] / 2 + profile.minFurnitureClearPath,
+      },
+    }
+  })
+
+  for (let i = 0; i < itemBoxes.length; i++) {
+    for (let j = i + 1; j < itemBoxes.length; j++) {
+      const a = itemBoxes[i]!
+      const b = itemBoxes[j]!
+      if (a.useBox.maxX > b.bbox.minX && a.useBox.minX < b.bbox.maxX && a.useBox.maxZ > b.bbox.minZ && a.useBox.minZ < b.bbox.maxZ) {
+        issues.push({
+          type: 'overlap',
+          severity: 'warning',
+          ruleId: 'furniture.use_clearance',
+          nodeId: a.item.id,
+          message: `Furniture "${a.item.asset.name}" does not leave enough usable clearance near "${b.item.asset.name}".`,
+        })
+      }
+    }
+  }
+
+  for (const wall of walls) {
+    const wallLen = wallLength(wall)
+    if (wallLen < 0.01) continue
+    const dirX = (wall.end[0] - wall.start[0]) / wallLen
+    const dirZ = (wall.end[1] - wall.start[1]) / wallLen
+    for (const childId of wall.children) {
+      const child = nodes[childId as AnyNodeId]
+      if (!child || child.type !== 'window') continue
+      const window = child as WindowNode
+      const localX = window.position[0]
+      const width = window.width ?? 1.5
+      const wx = wall.start[0] + dirX * localX
+      const wz = wall.start[1] + dirZ * localX
+      for (const item of floorItems) {
+        const dim = getScaledDimensions(item)
+        const radius = Math.max(dim[0], dim[2]) / 2
+        const distance = dist2D([wx, wz], [item.position[0], item.position[2]])
+        if (distance < width / 2 + radius + 0.35) {
+          issues.push({
+            type: 'overlap',
+            severity: 'warning',
+            ruleId: 'furniture.blocks_window',
+            nodeId: item.id,
+            message: `Furniture "${item.asset.name}" blocks access/daylight near a window.`,
+          })
+        }
       }
     }
   }
@@ -1440,6 +1521,7 @@ export function validateAndCorrectScene(levelId: string, codeProfile?: string): 
   detectWallGaps(walls, issues, profile)
   detectDoorWindowOverlap(walls, nodes, issues)
   validateFurnitureCollision(items, issues)
+  validateFurnitureUseClearance(items, walls, nodes, issues, profile)
   validatePhysicsAndStructure(items, slabs, walls, nodes, issues)
   validateArchitectureDesign(items, slabs, walls, zones, nodes, issues, profile)
   checkCirculationAndSafety(levelId, walls, slabs, items, zones, nodes, issues, profile)
@@ -1578,11 +1660,14 @@ function repairHintForIssue(issue: ValidationIssue): RepairHint {
       }
     case 'furniture.door_clearance':
     case 'circulation.furniture_clear_path':
+    case 'furniture.out_of_room_bounds':
+    case 'furniture.use_clearance':
+    case 'furniture.blocks_window':
       return {
         ruleId: issue.ruleId,
         nodeId: issue.nodeId,
-        preferredTools: ['move_nodes', 'place_in_room', 'place_against_wall'],
-        suggestedAction: 'Move furniture away from doors and circulation paths before continuing decoration.',
+        preferredTools: ['place_furniture_solved', 'suggest_furniture_layout', 'move_nodes'],
+        suggestedAction: 'Re-solve the furniture layout so items avoid room bounds, doors, windows, collisions, and use-clearance conflicts.',
         targetMetrics: { minClearanceMeters: 0.65 },
       }
     case 'room.kitchen_ventilation':
