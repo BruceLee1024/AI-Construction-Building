@@ -11,12 +11,21 @@
         "addSlab": true,
         "zoneName": "L Room"
       }
+    },
+    {
+      "tool": "create_window",
+      "args": {
+        "wallIndex": 1,
+        "position_t": 0.5
+      }
     }
   ],
   "assertions": [
     { "type": "toolResult.success", "step": 0 },
+    { "type": "toolResult.success", "step": 1 },
     { "type": "node.count", "nodeType": "wall", "exact": 6 },
     { "type": "node.count", "nodeType": "slab", "exact": 1 },
+    { "type": "node.count", "nodeType": "window", "exact": 1 },
     { "type": "node.exists", "nodeType": "zone", "where": { "name": "L Room" } },
     { "type": "geometry.closedWalls", "tolerance": 0.001 },
     { "type": "validation", "valid": true, "blocking": false, "warningCount": 0 }

@@ -8,7 +8,7 @@
         "origin": [0, 0],
         "width": 6,
         "depth": 5,
-        "addDoor": false,
+        "addDoor": true,
         "addWindows": true
       }
     },
@@ -25,6 +25,8 @@
     { "type": "toolResult.success", "step": 0 },
     { "type": "toolResult.success", "step": 1 },
     { "type": "node.count", "nodeType": "item", "exact": 1 },
+    { "type": "node.count", "nodeType": "door", "exact": 1 },
+    { "type": "node.count", "nodeType": "window", "exact": 3 },
     { "type": "node.exists", "nodeType": "item", "where": { "asset.id": "sofa" } },
     { "type": "validation", "valid": true, "blocking": false, "warningCount": 0 }
   ]

@@ -1,0 +1,276 @@
+{
+  "generatedAt": "2026-05-31T13:36:02.594Z",
+  "totals": {
+    "cases": 1,
+    "passed": 0,
+    "failed": 1,
+    "assertions": 8
+  },
+  "cases": [
+    {
+      "name": "intentional-fail",
+      "description": "Create one rectangular room with a door and slab.",
+      "pass": false,
+      "durationMs": 5,
+      "steps": [
+        {
+          "index": 0,
+          "tool": "create_room",
+          "args": {
+            "origin": [
+              0,
+              0
+            ],
+            "width": 5,
+            "depth": 4,
+            "addDoor": true,
+            "doorWall": "front",
+            "addWindows": true
+          },
+          "raw": "{\"success\":true,\"walls\":{\"success\":true,\"wallIds\":[\"wall_68nfc26s765414rp\",\"wall_xeqk6vsb3nwoo5kw\",\"wall_t1phulqui1ob5m00\",\"wall_e1kvel0h1isgkdvb\"],\"count\":4,\"walls\":[{\"id\":\"wall_68nfc26s765414rp\",\"index\":0,\"start\":[0,0],\"end\":[5,0],\"length\":5,\"orientation\":\"horizontal\",\"thickness\":0.15,\"height\":3},{\"id\":\"wall_xeqk6vsb3nwoo5kw\",\"index\":1,\"start\":[5,0],\"end\":[5,4],\"length\":4,\"orientation\":\"vertical\",\"thickness\":0.15,\"height\":3},{\"id\":\"wall_t1phulqui1ob5m00\",\"index\":2,\"start\":[5,4],\"end\":[0,4],\"length\":5,\"orientation\":\"horizontal\",\"thickness\":0.15,\"height\":3},{\"id\":\"wall_e1kvel0h1isgkdvb\",\"index\":3,\"start\":[0,4],\"end\":[0,0],\"length\":4,\"orientation\":\"vertical\",\"thickness\":0.15,\"height\":3}]},\"slab\":{\"success\":true,\"slabId\":\"slab_02cis4cdn7cwrjlx\"},\"spatialContext\":{\"roomBounds\":{\"minX\":0,\"minZ\":0,\"maxX\":5,\"maxZ\":4},\"interiorBounds\":{\"minX\":0.125,\"minZ\":0.125,\"maxX\":4.875,\"maxZ\":3.875},\"wallsByFace\":{\"south\":{\"id\":\"wall_68nfc26s765414rp\",\"start\":[0,0],\"end\":[5,0],\"length\":5},\"east\":{\"id\":\"wall_xeqk6vsb3nwoo5kw\",\"start\":[5,0],\"end\":[5,4],\"length\":4},\"north\":{\"id\":\"wall_t1phulqui1ob5m00\",\"start\":[5,4],\"end\":[0,4],\"length\":5},\"west\":{\"id\":\"wall_e1kvel0h1isgkdvb\",\"start\":[0,4],\"end\":[0,0],\"length\":4}},\"slabPolygon\":[[0.075,0.075],[4.925,0.075],[4.925,3.925],[0.075,3.925]]},\"door\":{\"success\":true,\"doorId\":\"door_j0d2qk9hlzabts6f\",\"wallId\":\"wall_68nfc26s765414rp\"},\"windows\":[{\"success\":true,\"windowId\":\"window_u5c85p0xcbnct83m\",\"wallId\":\"wall_xeqk6vsb3nwoo5kw\"},{\"success\":true,\"windowId\":\"window_i9xfpwg278c98g5e\",\"wallId\":\"wall_t1phulqui1ob5m00\"},{\"success\":true,\"windowId\":\"window_uvz9xrqyhb9bxeky\",\"wallId\":\"wall_e1kvel0h1isgkdvb\"}]}",
+          "parsed": {
+            "success": true,
+            "walls": {
+              "success": true,
+              "wallIds": [
+                "wall_68nfc26s765414rp",
+                "wall_xeqk6vsb3nwoo5kw",
+                "wall_t1phulqui1ob5m00",
+                "wall_e1kvel0h1isgkdvb"
+              ],
+              "count": 4,
+              "walls": [
+                {
+                  "id": "wall_68nfc26s765414rp",
+                  "index": 0,
+                  "start": [
+                    0,
+                    0
+                  ],
+                  "end": [
+                    5,
+                    0
+                  ],
+                  "length": 5,
+                  "orientation": "horizontal",
+                  "thickness": 0.15,
+                  "height": 3
+                },
+                {
+                  "id": "wall_xeqk6vsb3nwoo5kw",
+                  "index": 1,
+                  "start": [
+                    5,
+                    0
+                  ],
+                  "end": [
+                    5,
+                    4
+                  ],
+                  "length": 4,
+                  "orientation": "vertical",
+                  "thickness": 0.15,
+                  "height": 3
+                },
+                {
+                  "id": "wall_t1phulqui1ob5m00",
+                  "index": 2,
+                  "start": [
+                    5,
+                    4
+                  ],
+                  "end": [
+                    0,
+                    4
+                  ],
+                  "length": 5,
+                  "orientation": "horizontal",
+                  "thickness": 0.15,
+                  "height": 3
+                },
+                {
+                  "id": "wall_e1kvel0h1isgkdvb",
+                  "index": 3,
+                  "start": [
+                    0,
+                    4
+                  ],
+                  "end": [
+                    0,
+                    0
+                  ],
+                  "length": 4,
+                  "orientation": "vertical",
+                  "thickness": 0.15,
+                  "height": 3
+                }
+              ]
+            },
+            "slab": {
+              "success": true,
+              "slabId": "slab_02cis4cdn7cwrjlx"
+            },
+            "spatialContext": {
+              "roomBounds": {
+                "minX": 0,
+                "minZ": 0,
+                "maxX": 5,
+                "maxZ": 4
+              },
+              "interiorBounds": {
+                "minX": 0.125,
+                "minZ": 0.125,
+                "maxX": 4.875,
+                "maxZ": 3.875
+              },
+              "wallsByFace": {
+                "south": {
+                  "id": "wall_68nfc26s765414rp",
+                  "start": [
+                    0,
+                    0
+                  ],
+                  "end": [
+                    5,
+                    0
+                  ],
+                  "length": 5
+                },
+                "east": {
+                  "id": "wall_xeqk6vsb3nwoo5kw",
+                  "start": [
+                    5,
+                    0
+                  ],
+                  "end": [
+                    5,
+                    4
+                  ],
+                  "length": 4
+                },
+                "north": {
+                  "id": "wall_t1phulqui1ob5m00",
+                  "start": [
+                    5,
+                    4
+                  ],
+                  "end": [
+                    0,
+                    4
+                  ],
+                  "length": 5
+                },
+                "west": {
+                  "id": "wall_e1kvel0h1isgkdvb",
+                  "start": [
+                    0,
+                    4
+                  ],
+                  "end": [
+                    0,
+                    0
+                  ],
+                  "length": 4
+                }
+              },
+              "slabPolygon": [
+                [
+                  0.075,
+                  0.075
+                ],
+                [
+                  4.925,
+                  0.075
+                ],
+                [
+                  4.925,
+                  3.925
+                ],
+                [
+                  0.075,
+                  3.925
+                ]
+              ]
+            },
+            "door": {
+              "success": true,
+              "doorId": "door_j0d2qk9hlzabts6f",
+              "wallId": "wall_68nfc26s765414rp"
+            },
+            "windows": [
+              {
+                "success": true,
+                "windowId": "window_u5c85p0xcbnct83m",
+                "wallId": "wall_xeqk6vsb3nwoo5kw"
+              },
+              {
+                "success": true,
+                "windowId": "window_i9xfpwg278c98g5e",
+                "wallId": "wall_t1phulqui1ob5m00"
+              },
+              {
+                "success": true,
+                "windowId": "window_uvz9xrqyhb9bxeky",
+                "wallId": "wall_e1kvel0h1isgkdvb"
+              }
+            ]
+          }
+        }
+      ],
+      "validation": {
+        "valid": true,
+        "blocking": false,
+        "fixedCount": 0,
+        "warningCount": 0,
+        "blockingCount": 0,
+        "issueSummary": {},
+        "issues": [],
+        "message": "No spatial or building-code issues found",
+        "nextAction": "Continue to the next staged generation phase."
+      },
+      "assertions": [
+        {
+          "pass": true,
+          "type": "toolResult.success",
+          "message": "step 0 success expected true, received true"
+        },
+        {
+          "pass": true,
+          "type": "node.count",
+          "message": "wall count expected exact 4, received 4"
+        },
+        {
+          "pass": true,
+          "type": "node.count",
+          "message": "slab count expected exact 1, received 1"
+        },
+        {
+          "pass": true,
+          "type": "node.count",
+          "message": "door count expected exact 1, received 1"
+        },
+        {
+          "pass": true,
+          "type": "node.count",
+          "message": "window count expected exact 3, received 3"
+        },
+        {
+          "pass": true,
+          "type": "geometry.closedWalls",
+          "message": "closed wall loop expected, unmatched walls: none"
+        },
+        {
+          "pass": true,
+          "type": "validation",
+          "message": "validation matched expectations"
+        },
+        {
+          "pass": false,
+          "type": "node.count",
+          "message": "wall count expected exact 999, received 4"
+        }
+      ],
+      "error": "wall count expected exact 999, received 4"
+    }
+  ]
+}
