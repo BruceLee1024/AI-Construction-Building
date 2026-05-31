@@ -1,5 +1,5 @@
 import { useScene } from '@pascal-app/core'
-import type { AnyNode, AnyNodeId, WallNode, SlabNode, DoorNode, WindowNode, ItemNode } from '@pascal-app/core'
+import type { AnyNode, AnyNodeId, WallNode, SlabNode, DoorNode, WindowNode, ItemNode, ZoneNode } from '@pascal-app/core'
 import { pointInPolygon, getScaledDimensions } from '@pascal-app/core'
 
 // ============================================================================
@@ -22,7 +22,8 @@ interface ValidationResult {
   codeProfile: CodeProfileName
 }
 
-export type CodeProfileName = 'residential_default'
+export type CodeProfileName = 'residential_default' | 'china_residential'
+type RoomUse = 'bedroom' | 'living' | 'kitchen' | 'bathroom' | 'dining' | 'balcony' | 'corridor' | 'entry' | 'other'
 
 interface CodeProfile {
   name: CodeProfileName
@@ -37,6 +38,19 @@ interface CodeProfile {
   minWindowSillHeight: number
   minDoorClearance: number
   minUsableArea: number
+  minBedroomArea: number
+  minBedroomWidth: number
+  minLivingArea: number
+  minLivingWidth: number
+  minKitchenArea: number
+  minKitchenWidth: number
+  minBathroomArea: number
+  minEntryClearWidth: number
+  minFurnitureClearPath: number
+  minOpeningEdgeClearance: number
+  minOpeningSpacing: number
+  minFallProtectionSillHeight: number
+  minWetroomAdjacencyDistance: number
 }
 
 // ============================================================================
@@ -57,6 +71,46 @@ const CODE_PROFILES: Record<CodeProfileName, CodeProfile> = {
     minWindowSillHeight: 0.15,
     minDoorClearance: 0.5,
     minUsableArea: 2,
+    minBedroomArea: 6,
+    minBedroomWidth: 2.1,
+    minLivingArea: 10,
+    minLivingWidth: 2.7,
+    minKitchenArea: 3.5,
+    minKitchenWidth: 1.5,
+    minBathroomArea: 2,
+    minEntryClearWidth: 1,
+    minFurnitureClearPath: 0.6,
+    minOpeningEdgeClearance: 0.2,
+    minOpeningSpacing: 0.2,
+    minFallProtectionSillHeight: 0.75,
+    minWetroomAdjacencyDistance: 1.2,
+  },
+  china_residential: {
+    name: 'china_residential',
+    snapThreshold: 0.05,
+    furnitureMargin: 0.1,
+    openingMargin: 0.05,
+    minDoorClearWidth: 0.8,
+    minCorridorWidth: 1.1,
+    minRoomWidth: 1.8,
+    maxRoomAspectRatio: 3,
+    minDaylightRatio: 0.1,
+    minWindowSillHeight: 0.15,
+    minDoorClearance: 0.5,
+    minUsableArea: 2,
+    minBedroomArea: 7,
+    minBedroomWidth: 2.4,
+    minLivingArea: 12,
+    minLivingWidth: 3,
+    minKitchenArea: 4,
+    minKitchenWidth: 1.5,
+    minBathroomArea: 2.5,
+    minEntryClearWidth: 1.1,
+    minFurnitureClearPath: 0.65,
+    minOpeningEdgeClearance: 0.25,
+    minOpeningSpacing: 0.25,
+    minFallProtectionSillHeight: 0.9,
+    minWetroomAdjacencyDistance: 1.2,
   },
 }
 
@@ -402,6 +456,18 @@ function polygonBounds(poly: [number, number][]): {
   }
 }
 
+function polygonsIntersect(a: [number, number][], b: [number, number][]): boolean {
+  if (a.length < 3 || b.length < 3) return false
+
+  for (const pt of a) {
+    if (pointInPolygon(pt[0], pt[1], b)) return true
+  }
+  for (const pt of b) {
+    if (pointInPolygon(pt[0], pt[1], a)) return true
+  }
+  return false
+}
+
 function pointToSegmentDistance(
   point: [number, number],
   start: [number, number],
@@ -417,6 +483,92 @@ function pointToSegmentDistance(
     Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dz) / lenSq),
   )
   return dist2D(point, [start[0] + t * dx, start[1] + t * dz])
+}
+
+function inferRoomUse(name: string | undefined, metadata: unknown): RoomUse {
+  if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+    const roomType = (metadata as Record<string, unknown>).roomType
+    if (typeof roomType === 'string') {
+      const normalized = normalizeRoomUse(roomType)
+      if (normalized) return normalized
+    }
+  }
+
+  const normalized = normalizeRoomUse(name ?? '')
+  return normalized ?? 'other'
+}
+
+function normalizeRoomUse(value: string): RoomUse | null {
+  const lower = value.toLowerCase()
+  if (/卧|bed|master|kids|guest/.test(lower)) return 'bedroom'
+  if (/客|起居|living|lounge/.test(lower)) return 'living'
+  if (/厨|kitchen/.test(lower)) return 'kitchen'
+  if (/卫|浴|厕|bath|toilet|washroom/.test(lower)) return 'bathroom'
+  if (/餐|dining/.test(lower)) return 'dining'
+  if (/阳台|balcony/.test(lower)) return 'balcony'
+  if (/走廊|过道|hall|corridor/.test(lower)) return 'corridor'
+  if (/玄关|entry|foyer/.test(lower)) return 'entry'
+  return null
+}
+
+function collectZonesBySlab(slabs: SlabNode[], zones: ZoneNode[]): Map<string, ZoneNode[]> {
+  const result = new Map<string, ZoneNode[]>()
+  for (const slab of slabs) result.set(slab.id, [])
+
+  for (const slab of slabs) {
+    if (slab.polygon.length < 3) continue
+    const slabCentroid = polygonCentroid(slab.polygon)
+
+    for (const zone of zones) {
+      if (zone.polygon.length < 3) continue
+      const zoneCentroid = polygonCentroid(zone.polygon)
+      if (
+        pointInPolygon(zoneCentroid[0], zoneCentroid[1], slab.polygon) ||
+        pointInPolygon(slabCentroid[0], slabCentroid[1], zone.polygon) ||
+        polygonsIntersect(slab.polygon, zone.polygon)
+      ) {
+        result.get(slab.id)?.push(zone)
+      }
+    }
+  }
+
+  return result
+}
+
+function roomUsesForSlab(slab: SlabNode, zonesBySlab: Map<string, ZoneNode[]>): Set<RoomUse> {
+  const uses = new Set<RoomUse>()
+  for (const zone of zonesBySlab.get(slab.id) ?? []) {
+    uses.add(inferRoomUse(zone.name, zone.metadata))
+  }
+  return uses
+}
+
+function hasVentilationStrategy(use: RoomUse, windows: WindowNode[], items: ItemNode[]): boolean {
+  if (windows.length > 0) return true
+  if (use === 'kitchen') {
+    return items.some((item) => item.asset.category === 'kitchen' && /hood|exhaust|vent/i.test(`${item.asset.id} ${item.asset.name}`))
+  }
+  if (use === 'bathroom') {
+    return items.some((item) => /fan|exhaust|vent|dryer/i.test(`${item.asset.id} ${item.asset.name}`))
+  }
+  return false
+}
+
+function minDistanceBetweenPolygons(a: [number, number][], b: [number, number][]): number {
+  if (polygonsIntersect(a, b)) return 0
+
+  let best = Infinity
+  for (let i = 0; i < a.length; i++) {
+    const a0 = a[i]!
+    const a1 = a[(i + 1) % a.length]!
+    for (const pt of b) best = Math.min(best, pointToSegmentDistance(pt, a0, a1))
+  }
+  for (let i = 0; i < b.length; i++) {
+    const b0 = b[i]!
+    const b1 = b[(i + 1) % b.length]!
+    for (const pt of a) best = Math.min(best, pointToSegmentDistance(pt, b0, b1))
+  }
+  return best
 }
 
 function slabTouchesExterior(slab: SlabNode, walls: WallNode[]): boolean {
