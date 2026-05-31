@@ -1,0 +1,1104 @@
+{
+  "generatedAt": "2026-05-31T13:35:13.721Z",
+  "totals": {
+    "cases": 5,
+    "passed": 2,
+    "failed": 3,
+    "assertions": 29
+  },
+  "cases": [
+    {
+      "name": "furniture-inside-slab",
+      "description": "Place a sofa inside a room slab and confirm it remains valid.",
+      "pass": false,
+      "durationMs": 6,
+      "steps": [
+        {
+          "index": 0,
+          "tool": "create_room",
+          "args": {
+            "origin": [
+              0,
+              0
+            ],
+            "width": 6,
+            "depth": 5,
+            "addDoor": false,
+            "addWindows": true
+          },
+          "raw": "{\"success\":true,\"walls\":{\"success\":true,\"wallIds\":[\"wall_sjmzarnkk65mafdq\",\"wall_i9ffn7c1tnys481y\",\"wall_c6n5neux432941dk\",\"wall_shltcmyb7hsdn4t8\"],\"count\":4,\"walls\":[{\"id\":\"wall_sjmzarnkk65mafdq\",\"index\":0,\"start\":[0,0],\"end\":[6,0],\"length\":6,\"orientation\":\"horizontal\",\"thickness\":0.15,\"height\":3},{\"id\":\"wall_i9ffn7c1tnys481y\",\"index\":1,\"start\":[6,0],\"end\":[6,5],\"length\":5,\"orientation\":\"vertical\",\"thickness\":0.15,\"height\":3},{\"id\":\"wall_c6n5neux432941dk\",\"index\":2,\"start\":[6,5],\"end\":[0,5],\"length\":6,\"orientation\":\"horizontal\",\"thickness\":0.15,\"height\":3},{\"id\":\"wall_shltcmyb7hsdn4t8\",\"index\":3,\"start\":[0,5],\"end\":[0,0],\"length\":5,\"orientation\":\"vertical\",\"thickness\":0.15,\"height\":3}]},\"slab\":{\"success\":true,\"slabId\":\"slab_ctighyo4pefam7hx\"},\"spatialContext\":{\"roomBounds\":{\"minX\":0,\"minZ\":0,\"maxX\":6,\"maxZ\":5},\"interiorBounds\":{\"minX\":0.125,\"minZ\":0.125,\"maxX\":5.875,\"maxZ\":4.875},\"wallsByFace\":{\"south\":{\"id\":\"wall_sjmzarnkk65mafdq\",\"start\":[0,0],\"end\":[6,0],\"length\":6},\"east\":{\"id\":\"wall_i9ffn7c1tnys481y\",\"start\":[6,0],\"end\":[6,5],\"length\":5},\"north\":{\"id\":\"wall_c6n5neux432941dk\",\"start\":[6,5],\"end\":[0,5],\"length\":6},\"west\":{\"id\":\"wall_shltcmyb7hsdn4t8\",\"start\":[0,5],\"end\":[0,0],\"length\":5}},\"slabPolygon\":[[0.075,0.075],[5.925,0.075],[5.925,4.925],[0.075,4.925]]},\"windows\":[{\"success\":true,\"windowId\":\"window_c96c6wvkc5bq0xtj\",\"wallId\":\"wall_i9ffn7c1tnys481y\"},{\"success\":true,\"windowId\":\"window_28bcn1r0ffyuiuk6\",\"wallId\":\"wall_c6n5neux432941dk\"},{\"success\":true,\"windowId\":\"window_98p1zsfqa4xt6qtq\",\"wallId\":\"wall_shltcmyb7hsdn4t8\"}]}",
+          "parsed": {
+            "success": true,
+            "walls": {
+              "success": true,
+              "wallIds": [
+                "wall_sjmzarnkk65mafdq",
+                "wall_i9ffn7c1tnys481y",
+                "wall_c6n5neux432941dk",
+                "wall_shltcmyb7hsdn4t8"
+              ],
+              "count": 4,
+              "walls": [
+                {
+                  "id": "wall_sjmzarnkk65mafdq",
+                  "index": 0,
+                  "start": [
+                    0,
+                    0
+                  ],
+                  "end": [
+                    6,
+                    0
+                  ],
+                  "length": 6,
+                  "orientation": "horizontal",
+                  "thickness": 0.15,
+                  "height": 3
+                },
+                {
+                  "id": "wall_i9ffn7c1tnys481y",
+                  "index": 1,
+                  "start": [
+                    6,
+                    0
+                  ],
+                  "end": [
+                    6,
+                    5
+                  ],
+                  "length": 5,
+                  "orientation": "vertical",
+                  "thickness": 0.15,
+                  "height": 3
+                },
+                {
+                  "id": "wall_c6n5neux432941dk",
+                  "index": 2,
+                  "start": [
+                    6,
+                    5
+                  ],
+                  "end": [
+                    0,
+                    5
+                  ],
+                  "length": 6,
+                  "orientation": "horizontal",
+                  "thickness": 0.15,
+                  "height": 3
+                },
+                {
+                  "id": "wall_shltcmyb7hsdn4t8",
+                  "index": 3,
+                  "start": [
+                    0,
+                    5
+                  ],
+                  "end": [
+                    0,
+                    0
+                  ],
+                  "length": 5,
+                  "orientation": "vertical",
+                  "thickness": 0.15,
+                  "height": 3
+                }
+              ]
+            },
+            "slab": {
+              "success": true,
+              "slabId": "slab_ctighyo4pefam7hx"
+            },
+            "spatialContext": {
+              "roomBounds": {
+                "minX": 0,
+                "minZ": 0,
+                "maxX": 6,
+                "maxZ": 5
+              },
+              "interiorBounds": {
+                "minX": 0.125,
+                "minZ": 0.125,
+                "maxX": 5.875,
+                "maxZ": 4.875
+              },
+              "wallsByFace": {
+                "south": {
+                  "id": "wall_sjmzarnkk65mafdq",
+                  "start": [
+                    0,
+                    0
+                  ],
+                  "end": [
+                    6,
+                    0
+                  ],
+                  "length": 6
+                },
+                "east": {
+                  "id": "wall_i9ffn7c1tnys481y",
+                  "start": [
+                    6,
+                    0
+                  ],
+                  "end": [
+                    6,
+                    5
+                  ],
+                  "length": 5
+                },
+                "north": {
+                  "id": "wall_c6n5neux432941dk",
+                  "start": [
+                    6,
+                    5
+                  ],
+                  "end": [
+                    0,
+                    5
+                  ],
+                  "length": 6
+                },
+                "west": {
+                  "id": "wall_shltcmyb7hsdn4t8",
+                  "start": [
+                    0,
+                    5
+                  ],
+                  "end": [
+                    0,
+                    0
+                  ],
+                  "length": 5
+                }
+              },
+              "slabPolygon": [
+                [
+                  0.075,
+                  0.075
+                ],
+                [
+                  5.925,
+                  0.075
+                ],
+                [
+                  5.925,
+                  4.925
+                ],
+                [
+                  0.075,
+                  4.925
+                ]
+              ]
+            },
+            "windows": [
+              {
+                "success": true,
+                "windowId": "window_c96c6wvkc5bq0xtj",
+                "wallId": "wall_i9ffn7c1tnys481y"
+              },
+              {
+                "success": true,
+                "windowId": "window_28bcn1r0ffyuiuk6",
+                "wallId": "wall_c6n5neux432941dk"
+              },
+              {
+                "success": true,
+                "windowId": "window_98p1zsfqa4xt6qtq",
+                "wallId": "wall_shltcmyb7hsdn4t8"
+              }
+            ]
+          }
+        },
+        {
+          "index": 1,
+          "tool": "place_furniture",
+          "args": {
+            "type": "sofa",
+            "position": [
+              3,
+              0.05,
+              2.5
+            ],
+            "rotation": 0
+          },
+          "raw": "{\"success\":true,\"itemId\":\"item_knk5pppk5d8lynzl\",\"name\":\"Sofa\",\"catalogId\":\"sofa\",\"dimensions\":[2.5,0.8,1.5],\"position\":[3,0.05,2.5],\"bbox\":{\"minX\":1.75,\"minZ\":1.75,\"maxX\":4.25,\"maxZ\":3.25},\"insideSlabId\":\"slab_ctighyo4pefam7hx\"}",
+          "parsed": {
+            "success": true,
+            "itemId": "item_knk5pppk5d8lynzl",
+            "name": "Sofa",
+            "catalogId": "sofa",
+            "dimensions": [
+              2.5,
+              0.8,
+              1.5
+            ],
+            "position": [
+              3,
+              0.05,
+              2.5
+            ],
+            "bbox": {
+              "minX": 1.75,
+              "minZ": 1.75,
+              "maxX": 4.25,
+              "maxZ": 3.25
+            },
+            "insideSlabId": "slab_ctighyo4pefam7hx"
+          }
+        }
+      ],
+      "validation": {
+        "valid": false,
+        "blocking": true,
+        "fixedCount": 0,
+        "warningCount": 1,
+        "blockingCount": 1,
+        "issueSummary": {
+          "code": 1
+        },
+        "issues": [
+          {
+            "type": "code",
+            "severity": "warning",
+            "nodeId": "slab_ctighyo4pefam7hx",
+            "message": "Room/slab slab_ctighyo4pefam7hx has no associated door/opening. Add a doorway for circulation."
+          }
+        ],
+        "nextAction": "Fix blocking warnings before continuing to furniture, roof, decoration, or finalization."
+      },
+      "assertions": [
+        {
+          "pass": true,
+          "type": "toolResult.success",
+          "message": "step 0 success expected true, received true"
+        },
+        {
+          "pass": true,
+          "type": "toolResult.success",
+          "message": "step 1 success expected true, received true"
+        },
+        {
+          "pass": true,
+          "type": "node.count",
+          "message": "item count expected exact 1, received 1"
+        },
+        {
+          "pass": true,
+          "type": "node.exists",
+          "message": "item exists with {\"asset.id\":\"sofa\"}"
+        },
+        {
+          "pass": false,
+          "type": "validation",
+          "message": "valid expected true, received false; blocking expected false, received true; warningCount expected exact 0, received 1"
+        }
+      ],
+      "error": "valid expected true, received false; blocking expected false, received true; warningCount expected exact 0, received 1"
+    },
+    {
+      "name": "negative-invalid-wall",
+      "description": "Invalid wall input returns an error and does not add scene geometry.",
+      "pass": true,
+      "durationMs": 0,
+      "steps": [
+        {
+          "index": 0,
+          "tool": "create_walls",
+          "args": {
+            "walls": [
+              {
+                "start": [
+                  0,
+                  0
+                ],
+                "end": [
+                  0,
+                  0
+                ]
+              }
+            ]
+          },
+          "raw": "{\"error\":\"Wall 0: start and end are the same point\"}",
+          "parsed": {
+            "error": "Wall 0: start and end are the same point"
+          }
+        }
+      ],
+      "validation": {
+        "valid": true,
+        "blocking": false,
+        "fixedCount": 0,
+        "warningCount": 0,
+        "blockingCount": 0,
+        "issueSummary": {},
+        "issues": [],
+        "message": "No spatial or building-code issues found",
+        "nextAction": "Continue to the next staged generation phase."
+      },
+      "assertions": [
+        {
+          "pass": true,
+          "type": "toolResult.success",
+          "message": "step 0 success expected false, received false"
+        },
+        {
+          "pass": true,
+          "type": "node.count",
+          "message": "wall count expected exact 0, received 0"
+        },
+        {
+          "pass": true,
+          "type": "node.count",
+          "message": "slab count expected exact 0, received 0"
+        },
+        {
+          "pass": true,
+          "type": "node.count",
+          "message": "door count expected exact 0, received 0"
+        },
+        {
+          "pass": true,
+          "type": "validation",
+          "message": "validation matched expectations"
+        }
+      ]
+    },
+    {
+      "name": "polygon-room-closure",
+      "description": "Create a non-rectangular polygon room and verify wall closure.",
+      "pass": false,
+      "durationMs": 4,
+      "steps": [
+        {
+          "index": 0,
+          "tool": "create_polygon_room",
+          "args": {
+            "polygon": [
+              [
+                0,
+                0
+              ],
+              [
+                5,
+                0
+              ],
+              [
+                5,
+                3
+              ],
+              [
+                3,
+                3
+              ],
+              [
+                3,
+                5
+              ],
+              [
+                0,
+                5
+              ]
+            ],
+            "addDoor": true,
+            "doorEdgeIndex": 0,
+            "addSlab": true,
+            "zoneName": "L Room"
+          },
+          "raw": "{\"success\":true,\"walls\":{\"success\":true,\"wallIds\":[\"wall_ifimvoohwdyj9sjx\",\"wall_po37ertiklvwsngp\",\"wall_yyyl8flpo9qlx5j2\",\"wall_uai42bkt8bpswegn\",\"wall_gp0ywtnn2dx98vx0\",\"wall_uw3k8l4sqex35b71\"],\"count\":6,\"walls\":[{\"id\":\"wall_ifimvoohwdyj9sjx\",\"index\":0,\"start\":[0,0],\"end\":[5,0],\"length\":5,\"orientation\":\"horizontal\",\"thickness\":0.15,\"height\":3},{\"id\":\"wall_po37ertiklvwsngp\",\"index\":1,\"start\":[5,0],\"end\":[5,3],\"length\":3,\"orientation\":\"vertical\",\"thickness\":0.15,\"height\":3},{\"id\":\"wall_yyyl8flpo9qlx5j2\",\"index\":2,\"start\":[5,3],\"end\":[3,3],\"length\":2,\"orientation\":\"horizontal\",\"thickness\":0.15,\"height\":3},{\"id\":\"wall_uai42bkt8bpswegn\",\"index\":3,\"start\":[3,3],\"end\":[3,5],\"length\":2,\"orientation\":\"vertical\",\"thickness\":0.15,\"height\":3},{\"id\":\"wall_gp0ywtnn2dx98vx0\",\"index\":4,\"start\":[3,5],\"end\":[0,5],\"length\":3,\"orientation\":\"horizontal\",\"thickness\":0.15,\"height\":3},{\"id\":\"wall_uw3k8l4sqex35b71\",\"index\":5,\"start\":[0,5],\"end\":[0,0],\"length\":5,\"orientation\":\"vertical\",\"thickness\":0.15,\"height\":3}]},\"slab\":{\"success\":true,\"slabId\":\"slab_ogi0201tpz7vj12e\"},\"door\":{\"success\":true,\"doorId\":\"door_hbutb1vwl0woj4os\",\"wallId\":\"wall_ifimvoohwdyj9sjx\"},\"zone\":{\"success\":true,\"zoneId\":\"zone_crmqztdqvpdrusy6\",\"name\":\"L Room\"}}",
+          "parsed": {
+            "success": true,
+            "walls": {
+              "success": true,
+              "wallIds": [
+                "wall_ifimvoohwdyj9sjx",
+                "wall_po37ertiklvwsngp",
+                "wall_yyyl8flpo9qlx5j2",
+                "wall_uai42bkt8bpswegn",
+                "wall_gp0ywtnn2dx98vx0",
+                "wall_uw3k8l4sqex35b71"
+              ],
+              "count": 6,
+              "walls": [
+                {
+                  "id": "wall_ifimvoohwdyj9sjx",
+                  "index": 0,
+                  "start": [
+                    0,
+                    0
+                  ],
+                  "end": [
+                    5,
+                    0
+                  ],
+                  "length": 5,
+                  "orientation": "horizontal",
+                  "thickness": 0.15,
+                  "height": 3
+                },
+                {
+                  "id": "wall_po37ertiklvwsngp",
+                  "index": 1,
+                  "start": [
+                    5,
+                    0
+                  ],
+                  "end": [
+                    5,
+                    3
+                  ],
+                  "length": 3,
+                  "orientation": "vertical",
+                  "thickness": 0.15,
+                  "height": 3
+                },
+                {
+                  "id": "wall_yyyl8flpo9qlx5j2",
+                  "index": 2,
+                  "start": [
+                    5,
+                    3
+                  ],
+                  "end": [
+                    3,
+                    3
+                  ],
+                  "length": 2,
+                  "orientation": "horizontal",
+                  "thickness": 0.15,
+                  "height": 3
+                },
+                {
+                  "id": "wall_uai42bkt8bpswegn",
+                  "index": 3,
+                  "start": [
+                    3,
+                    3
+                  ],
+                  "end": [
+                    3,
+                    5
+                  ],
+                  "length": 2,
+                  "orientation": "vertical",
+                  "thickness": 0.15,
+                  "height": 3
+                },
+                {
+                  "id": "wall_gp0ywtnn2dx98vx0",
+                  "index": 4,
+                  "start": [
+                    3,
+                    5
+                  ],
+                  "end": [
+                    0,
+                    5
+                  ],
+                  "length": 3,
+                  "orientation": "horizontal",
+                  "thickness": 0.15,
+                  "height": 3
+                },
+                {
+                  "id": "wall_uw3k8l4sqex35b71",
+                  "index": 5,
+                  "start": [
+                    0,
+                    5
+                  ],
+                  "end": [
+                    0,
+                    0
+                  ],
+                  "length": 5,
+                  "orientation": "vertical",
+                  "thickness": 0.15,
+                  "height": 3
+                }
+              ]
+            },
+            "slab": {
+              "success": true,
+              "slabId": "slab_ogi0201tpz7vj12e"
+            },
+            "door": {
+              "success": true,
+              "doorId": "door_hbutb1vwl0woj4os",
+              "wallId": "wall_ifimvoohwdyj9sjx"
+            },
+            "zone": {
+              "success": true,
+              "zoneId": "zone_crmqztdqvpdrusy6",
+              "name": "L Room"
+            }
+          }
+        }
+      ],
+      "validation": {
+        "valid": false,
+        "blocking": true,
+        "fixedCount": 0,
+        "warningCount": 1,
+        "blockingCount": 1,
+        "issueSummary": {
+          "code": 1
+        },
+        "issues": [
+          {
+            "type": "code",
+            "severity": "warning",
+            "nodeId": "slab_ogi0201tpz7vj12e",
+            "message": "Room/slab slab_ogi0201tpz7vj12e has no associated exterior window. Add daylight/ventilation before furnishing."
+          }
+        ],
+        "nextAction": "Fix blocking warnings before continuing to furniture, roof, decoration, or finalization."
+      },
+      "assertions": [
+        {
+          "pass": true,
+          "type": "toolResult.success",
+          "message": "step 0 success expected true, received true"
+        },
+        {
+          "pass": true,
+          "type": "node.count",
+          "message": "wall count expected exact 6, received 6"
+        },
+        {
+          "pass": true,
+          "type": "node.count",
+          "message": "slab count expected exact 1, received 1"
+        },
+        {
+          "pass": true,
+          "type": "node.exists",
+          "message": "zone exists with {\"name\":\"L Room\"}"
+        },
+        {
+          "pass": true,
+          "type": "geometry.closedWalls",
+          "message": "closed wall loop expected, unmatched walls: none"
+        },
+        {
+          "pass": false,
+          "type": "validation",
+          "message": "valid expected true, received false; blocking expected false, received true; warningCount expected exact 0, received 1"
+        }
+      ],
+      "error": "valid expected true, received false; blocking expected false, received true; warningCount expected exact 0, received 1"
+    },
+    {
+      "name": "rectangular-room",
+      "description": "Create one rectangular room with a door and slab.",
+      "pass": false,
+      "durationMs": 1,
+      "steps": [
+        {
+          "index": 0,
+          "tool": "create_room",
+          "args": {
+            "origin": [
+              0,
+              0
+            ],
+            "width": 5,
+            "depth": 4,
+            "addDoor": true,
+            "doorWall": "front",
+            "addWindows": false
+          },
+          "raw": "{\"success\":true,\"walls\":{\"success\":true,\"wallIds\":[\"wall_m8whkauzwjnvgfyp\",\"wall_zt1d2k6624ln5gul\",\"wall_8c9qervh2u6ixzry\",\"wall_p9v1752ao1atf7f6\"],\"count\":4,\"walls\":[{\"id\":\"wall_m8whkauzwjnvgfyp\",\"index\":0,\"start\":[0,0],\"end\":[5,0],\"length\":5,\"orientation\":\"horizontal\",\"thickness\":0.15,\"height\":3},{\"id\":\"wall_zt1d2k6624ln5gul\",\"index\":1,\"start\":[5,0],\"end\":[5,4],\"length\":4,\"orientation\":\"vertical\",\"thickness\":0.15,\"height\":3},{\"id\":\"wall_8c9qervh2u6ixzry\",\"index\":2,\"start\":[5,4],\"end\":[0,4],\"length\":5,\"orientation\":\"horizontal\",\"thickness\":0.15,\"height\":3},{\"id\":\"wall_p9v1752ao1atf7f6\",\"index\":3,\"start\":[0,4],\"end\":[0,0],\"length\":4,\"orientation\":\"vertical\",\"thickness\":0.15,\"height\":3}]},\"slab\":{\"success\":true,\"slabId\":\"slab_x9nsu0ua0wcfbs0q\"},\"spatialContext\":{\"roomBounds\":{\"minX\":0,\"minZ\":0,\"maxX\":5,\"maxZ\":4},\"interiorBounds\":{\"minX\":0.125,\"minZ\":0.125,\"maxX\":4.875,\"maxZ\":3.875},\"wallsByFace\":{\"south\":{\"id\":\"wall_m8whkauzwjnvgfyp\",\"start\":[0,0],\"end\":[5,0],\"length\":5},\"east\":{\"id\":\"wall_zt1d2k6624ln5gul\",\"start\":[5,0],\"end\":[5,4],\"length\":4},\"north\":{\"id\":\"wall_8c9qervh2u6ixzry\",\"start\":[5,4],\"end\":[0,4],\"length\":5},\"west\":{\"id\":\"wall_p9v1752ao1atf7f6\",\"start\":[0,4],\"end\":[0,0],\"length\":4}},\"slabPolygon\":[[0.075,0.075],[4.925,0.075],[4.925,3.925],[0.075,3.925]]},\"door\":{\"success\":true,\"doorId\":\"door_v2g14vppntmd50fm\",\"wallId\":\"wall_m8whkauzwjnvgfyp\"}}",
+          "parsed": {
+            "success": true,
+            "walls": {
+              "success": true,
+              "wallIds": [
+                "wall_m8whkauzwjnvgfyp",
+                "wall_zt1d2k6624ln5gul",
+                "wall_8c9qervh2u6ixzry",
+                "wall_p9v1752ao1atf7f6"
+              ],
+              "count": 4,
+              "walls": [
+                {
+                  "id": "wall_m8whkauzwjnvgfyp",
+                  "index": 0,
+                  "start": [
+                    0,
+                    0
+                  ],
+                  "end": [
+                    5,
+                    0
+                  ],
+                  "length": 5,
+                  "orientation": "horizontal",
+                  "thickness": 0.15,
+                  "height": 3
+                },
+                {
+                  "id": "wall_zt1d2k6624ln5gul",
+                  "index": 1,
+                  "start": [
+                    5,
+                    0
+                  ],
+                  "end": [
+                    5,
+                    4
+                  ],
+                  "length": 4,
+                  "orientation": "vertical",
+                  "thickness": 0.15,
+                  "height": 3
+                },
+                {
+                  "id": "wall_8c9qervh2u6ixzry",
+                  "index": 2,
+                  "start": [
+                    5,
+                    4
+                  ],
+                  "end": [
+                    0,
+                    4
+                  ],
+                  "length": 5,
+                  "orientation": "horizontal",
+                  "thickness": 0.15,
+                  "height": 3
+                },
+                {
+                  "id": "wall_p9v1752ao1atf7f6",
+                  "index": 3,
+                  "start": [
+                    0,
+                    4
+                  ],
+                  "end": [
+                    0,
+                    0
+                  ],
+                  "length": 4,
+                  "orientation": "vertical",
+                  "thickness": 0.15,
+                  "height": 3
+                }
+              ]
+            },
+            "slab": {
+              "success": true,
+              "slabId": "slab_x9nsu0ua0wcfbs0q"
+            },
+            "spatialContext": {
+              "roomBounds": {
+                "minX": 0,
+                "minZ": 0,
+                "maxX": 5,
+                "maxZ": 4
+              },
+              "interiorBounds": {
+                "minX": 0.125,
+                "minZ": 0.125,
+                "maxX": 4.875,
+                "maxZ": 3.875
+              },
+              "wallsByFace": {
+                "south": {
+                  "id": "wall_m8whkauzwjnvgfyp",
+                  "start": [
+                    0,
+                    0
+                  ],
+                  "end": [
+                    5,
+                    0
+                  ],
+                  "length": 5
+                },
+                "east": {
+                  "id": "wall_zt1d2k6624ln5gul",
+                  "start": [
+                    5,
+                    0
+                  ],
+                  "end": [
+                    5,
+                    4
+                  ],
+                  "length": 4
+                },
+                "north": {
+                  "id": "wall_8c9qervh2u6ixzry",
+                  "start": [
+                    5,
+                    4
+                  ],
+                  "end": [
+                    0,
+                    4
+                  ],
+                  "length": 5
+                },
+                "west": {
+                  "id": "wall_p9v1752ao1atf7f6",
+                  "start": [
+                    0,
+                    4
+                  ],
+                  "end": [
+                    0,
+                    0
+                  ],
+                  "length": 4
+                }
+              },
+              "slabPolygon": [
+                [
+                  0.075,
+                  0.075
+                ],
+                [
+                  4.925,
+                  0.075
+                ],
+                [
+                  4.925,
+                  3.925
+                ],
+                [
+                  0.075,
+                  3.925
+                ]
+              ]
+            },
+            "door": {
+              "success": true,
+              "doorId": "door_v2g14vppntmd50fm",
+              "wallId": "wall_m8whkauzwjnvgfyp"
+            }
+          }
+        }
+      ],
+      "validation": {
+        "valid": false,
+        "blocking": true,
+        "fixedCount": 0,
+        "warningCount": 1,
+        "blockingCount": 1,
+        "issueSummary": {
+          "code": 1
+        },
+        "issues": [
+          {
+            "type": "code",
+            "severity": "warning",
+            "nodeId": "slab_x9nsu0ua0wcfbs0q",
+            "message": "Room/slab slab_x9nsu0ua0wcfbs0q has no associated exterior window. Add daylight/ventilation before furnishing."
+          }
+        ],
+        "nextAction": "Fix blocking warnings before continuing to furniture, roof, decoration, or finalization."
+      },
+      "assertions": [
+        {
+          "pass": true,
+          "type": "toolResult.success",
+          "message": "step 0 success expected true, received true"
+        },
+        {
+          "pass": true,
+          "type": "node.count",
+          "message": "wall count expected exact 4, received 4"
+        },
+        {
+          "pass": true,
+          "type": "node.count",
+          "message": "slab count expected exact 1, received 1"
+        },
+        {
+          "pass": true,
+          "type": "node.count",
+          "message": "door count expected exact 1, received 1"
+        },
+        {
+          "pass": true,
+          "type": "geometry.closedWalls",
+          "message": "closed wall loop expected, unmatched walls: none"
+        },
+        {
+          "pass": false,
+          "type": "validation",
+          "message": "valid expected true, received false; blocking expected false, received true; warningCount expected exact 0, received 1"
+        }
+      ],
+      "error": "valid expected true, received false; blocking expected false, received true; warningCount expected exact 0, received 1"
+    },
+    {
+      "name": "room-ceiling-windows",
+      "description": "Create a room with ceiling and windows.",
+      "pass": true,
+      "durationMs": 1,
+      "steps": [
+        {
+          "index": 0,
+          "tool": "create_room",
+          "args": {
+            "origin": [
+              0,
+              0
+            ],
+            "width": 6,
+            "depth": 5,
+            "addDoor": true,
+            "doorWall": "front",
+            "addWindows": true,
+            "addCeiling": true,
+            "ceilingHeight": 2.6
+          },
+          "raw": "{\"success\":true,\"walls\":{\"success\":true,\"wallIds\":[\"wall_z8wjo9c2protyyc5\",\"wall_w4ywg71skl9wowi8\",\"wall_4g7vygpr87ubpl12\",\"wall_9bcqtn0qvrugeeg1\"],\"count\":4,\"walls\":[{\"id\":\"wall_z8wjo9c2protyyc5\",\"index\":0,\"start\":[0,0],\"end\":[6,0],\"length\":6,\"orientation\":\"horizontal\",\"thickness\":0.15,\"height\":3},{\"id\":\"wall_w4ywg71skl9wowi8\",\"index\":1,\"start\":[6,0],\"end\":[6,5],\"length\":5,\"orientation\":\"vertical\",\"thickness\":0.15,\"height\":3},{\"id\":\"wall_4g7vygpr87ubpl12\",\"index\":2,\"start\":[6,5],\"end\":[0,5],\"length\":6,\"orientation\":\"horizontal\",\"thickness\":0.15,\"height\":3},{\"id\":\"wall_9bcqtn0qvrugeeg1\",\"index\":3,\"start\":[0,5],\"end\":[0,0],\"length\":5,\"orientation\":\"vertical\",\"thickness\":0.15,\"height\":3}]},\"slab\":{\"success\":true,\"slabId\":\"slab_oz1c54wxcpjudhai\"},\"spatialContext\":{\"roomBounds\":{\"minX\":0,\"minZ\":0,\"maxX\":6,\"maxZ\":5},\"interiorBounds\":{\"minX\":0.125,\"minZ\":0.125,\"maxX\":5.875,\"maxZ\":4.875},\"wallsByFace\":{\"south\":{\"id\":\"wall_z8wjo9c2protyyc5\",\"start\":[0,0],\"end\":[6,0],\"length\":6},\"east\":{\"id\":\"wall_w4ywg71skl9wowi8\",\"start\":[6,0],\"end\":[6,5],\"length\":5},\"north\":{\"id\":\"wall_4g7vygpr87ubpl12\",\"start\":[6,5],\"end\":[0,5],\"length\":6},\"west\":{\"id\":\"wall_9bcqtn0qvrugeeg1\",\"start\":[0,5],\"end\":[0,0],\"length\":5}},\"slabPolygon\":[[0.075,0.075],[5.925,0.075],[5.925,4.925],[0.075,4.925]]},\"door\":{\"success\":true,\"doorId\":\"door_5i40aqbezrza2x1a\",\"wallId\":\"wall_z8wjo9c2protyyc5\"},\"windows\":[{\"success\":true,\"windowId\":\"window_ymn50b4xqj0s9s61\",\"wallId\":\"wall_w4ywg71skl9wowi8\"},{\"success\":true,\"windowId\":\"window_smjmuicge3mw3o1o\",\"wallId\":\"wall_4g7vygpr87ubpl12\"},{\"success\":true,\"windowId\":\"window_lh6htiu3q7e2ku57\",\"wallId\":\"wall_9bcqtn0qvrugeeg1\"}],\"ceiling\":{\"success\":true,\"ceilingId\":\"ceiling_f7a3z5z6sdna6ib0\",\"height\":2.6}}",
+          "parsed": {
+            "success": true,
+            "walls": {
+              "success": true,
+              "wallIds": [
+                "wall_z8wjo9c2protyyc5",
+                "wall_w4ywg71skl9wowi8",
+                "wall_4g7vygpr87ubpl12",
+                "wall_9bcqtn0qvrugeeg1"
+              ],
+              "count": 4,
+              "walls": [
+                {
+                  "id": "wall_z8wjo9c2protyyc5",
+                  "index": 0,
+                  "start": [
+                    0,
+                    0
+                  ],
+                  "end": [
+                    6,
+                    0
+                  ],
+                  "length": 6,
+                  "orientation": "horizontal",
+                  "thickness": 0.15,
+                  "height": 3
+                },
+                {
+                  "id": "wall_w4ywg71skl9wowi8",
+                  "index": 1,
+                  "start": [
+                    6,
+                    0
+                  ],
+                  "end": [
+                    6,
+                    5
+                  ],
+                  "length": 5,
+                  "orientation": "vertical",
+                  "thickness": 0.15,
+                  "height": 3
+                },
+                {
+                  "id": "wall_4g7vygpr87ubpl12",
+                  "index": 2,
+                  "start": [
+                    6,
+                    5
+                  ],
+                  "end": [
+                    0,
+                    5
+                  ],
+                  "length": 6,
+                  "orientation": "horizontal",
+                  "thickness": 0.15,
+                  "height": 3
+                },
+                {
+                  "id": "wall_9bcqtn0qvrugeeg1",
+                  "index": 3,
+                  "start": [
+                    0,
+                    5
+                  ],
+                  "end": [
+                    0,
+                    0
+                  ],
+                  "length": 5,
+                  "orientation": "vertical",
+                  "thickness": 0.15,
+                  "height": 3
+                }
+              ]
+            },
+            "slab": {
+              "success": true,
+              "slabId": "slab_oz1c54wxcpjudhai"
+            },
+            "spatialContext": {
+              "roomBounds": {
+                "minX": 0,
+                "minZ": 0,
+                "maxX": 6,
+                "maxZ": 5
+              },
+              "interiorBounds": {
+                "minX": 0.125,
+                "minZ": 0.125,
+                "maxX": 5.875,
+                "maxZ": 4.875
+              },
+              "wallsByFace": {
+                "south": {
+                  "id": "wall_z8wjo9c2protyyc5",
+                  "start": [
+                    0,
+                    0
+                  ],
+                  "end": [
+                    6,
+                    0
+                  ],
+                  "length": 6
+                },
+                "east": {
+                  "id": "wall_w4ywg71skl9wowi8",
+                  "start": [
+                    6,
+                    0
+                  ],
+                  "end": [
+                    6,
+                    5
+                  ],
+                  "length": 5
+                },
+                "north": {
+                  "id": "wall_4g7vygpr87ubpl12",
+                  "start": [
+                    6,
+                    5
+                  ],
+                  "end": [
+                    0,
+                    5
+                  ],
+                  "length": 6
+                },
+                "west": {
+                  "id": "wall_9bcqtn0qvrugeeg1",
+                  "start": [
+                    0,
+                    5
+                  ],
+                  "end": [
+                    0,
+                    0
+                  ],
+                  "length": 5
+                }
+              },
+              "slabPolygon": [
+                [
+                  0.075,
+                  0.075
+                ],
+                [
+                  5.925,
+                  0.075
+                ],
+                [
+                  5.925,
+                  4.925
+                ],
+                [
+                  0.075,
+                  4.925
+                ]
+              ]
+            },
+            "door": {
+              "success": true,
+              "doorId": "door_5i40aqbezrza2x1a",
+              "wallId": "wall_z8wjo9c2protyyc5"
+            },
+            "windows": [
+              {
+                "success": true,
+                "windowId": "window_ymn50b4xqj0s9s61",
+                "wallId": "wall_w4ywg71skl9wowi8"
+              },
+              {
+                "success": true,
+                "windowId": "window_smjmuicge3mw3o1o",
+                "wallId": "wall_4g7vygpr87ubpl12"
+              },
+              {
+                "success": true,
+                "windowId": "window_lh6htiu3q7e2ku57",
+                "wallId": "wall_9bcqtn0qvrugeeg1"
+              }
+            ],
+            "ceiling": {
+              "success": true,
+              "ceilingId": "ceiling_f7a3z5z6sdna6ib0",
+              "height": 2.6
+            }
+          }
+        }
+      ],
+      "validation": {
+        "valid": true,
+        "blocking": false,
+        "fixedCount": 0,
+        "warningCount": 0,
+        "blockingCount": 0,
+        "issueSummary": {},
+        "issues": [],
+        "message": "No spatial or building-code issues found",
+        "nextAction": "Continue to the next staged generation phase."
+      },
+      "assertions": [
+        {
+          "pass": true,
+          "type": "toolResult.success",
+          "message": "step 0 success expected true, received true"
+        },
+        {
+          "pass": true,
+          "type": "node.count",
+          "message": "wall count expected exact 4, received 4"
+        },
+        {
+          "pass": true,
+          "type": "node.count",
+          "message": "window count expected exact 3, received 3"
+        },
+        {
+          "pass": true,
+          "type": "node.count",
+          "message": "ceiling count expected exact 1, received 1"
+        },
+        {
+          "pass": true,
+          "type": "node.exists",
+          "message": "ceiling exists with {\"height\":{\"approx\":2.6,\"tolerance\":0.001}}"
+        },
+        {
+          "pass": true,
+          "type": "geometry.closedWalls",
+          "message": "closed wall loop expected, unmatched walls: none"
+        },
+        {
+          "pass": true,
+          "type": "validation",
+          "message": "validation matched expectations"
+        }
+      ]
+    }
+  ]
+}

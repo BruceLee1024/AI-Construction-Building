@@ -26,7 +26,7 @@ type CliOptions = {
   verbose: boolean
 }
 
-const rootDir = path.resolve(fileURLToPath(new URL('../..', import.meta.url)))
+const rootDir = process.cwd()
 const casesDir = path.join(rootDir, 'tooling/agent-harness/cases')
 const defaultReportPath = path.join(rootDir, 'artifacts/agent-harness/latest.json')
 

@@ -7,7 +7,6 @@ var __export = (target, all) => {
 // tooling/agent-harness/run.ts
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 // node_modules/.bun/nanoid@5.1.6/node_modules/nanoid/index.js
 import { webcrypto as crypto } from "node:crypto";
@@ -19771,7 +19770,7 @@ function nodesByType(nodes, type) {
 }
 
 // tooling/agent-harness/run.ts
-var rootDir = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
+var rootDir = process.cwd();
 var casesDir = path.join(rootDir, "tooling/agent-harness/cases");
 var defaultReportPath = path.join(rootDir, "artifacts/agent-harness/latest.json");
 if (!globalThis.requestAnimationFrame) {
