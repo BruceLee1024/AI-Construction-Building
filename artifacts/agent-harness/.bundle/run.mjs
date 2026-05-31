@@ -16897,6 +16897,13 @@ function validateFurnitureBounds(items, slabs, issues, profile) {
       }
     }
     if (!insideAnySlab) {
+      issues.push({
+        type: "bounds",
+        severity: "warning",
+        ruleId: "furniture.out_of_room_bounds",
+        nodeId: item.id,
+        message: `Item "${item.asset.name}" was placed outside every room slab before auto-correction.`
+      });
       let nearestSlab = slabs[0];
       let nearestDist = Infinity;
       for (const slab of slabs) {
@@ -17282,6 +17289,71 @@ function validateFurnitureCollision(items, issues) {
           nodeId: a.id,
           message: `Furniture "${a.asset.name}" might be colliding with "${b.asset.name}"`
         });
+      }
+    }
+  }
+}
+function validateFurnitureUseClearance(items, walls, nodes, issues, profile) {
+  const floorItems = items.filter((i) => i.asset.attachTo !== "wall" && i.asset.attachTo !== "wall-side" && i.asset.attachTo !== "ceiling");
+  const itemBoxes = floorItems.map((item) => {
+    const dim = getScaledDimensions(item);
+    return {
+      item,
+      bbox: {
+        minX: item.position[0] - dim[0] / 2,
+        minZ: item.position[2] - dim[2] / 2,
+        maxX: item.position[0] + dim[0] / 2,
+        maxZ: item.position[2] + dim[2] / 2
+      },
+      useBox: {
+        minX: item.position[0] - dim[0] / 2 - profile.minFurnitureClearPath,
+        minZ: item.position[2] - dim[2] / 2 - profile.minFurnitureClearPath,
+        maxX: item.position[0] + dim[0] / 2 + profile.minFurnitureClearPath,
+        maxZ: item.position[2] + dim[2] / 2 + profile.minFurnitureClearPath
+      }
+    };
+  });
+  for (let i = 0; i < itemBoxes.length; i++) {
+    for (let j = i + 1; j < itemBoxes.length; j++) {
+      const a = itemBoxes[i];
+      const b = itemBoxes[j];
+      if (a.useBox.maxX > b.bbox.minX && a.useBox.minX < b.bbox.maxX && a.useBox.maxZ > b.bbox.minZ && a.useBox.minZ < b.bbox.maxZ) {
+        issues.push({
+          type: "overlap",
+          severity: "warning",
+          ruleId: "furniture.use_clearance",
+          nodeId: a.item.id,
+          message: `Furniture "${a.item.asset.name}" does not leave enough usable clearance near "${b.item.asset.name}".`
+        });
+      }
+    }
+  }
+  for (const wall of walls) {
+    const wallLen = wallLength(wall);
+    if (wallLen < 0.01) continue;
+    const dirX = (wall.end[0] - wall.start[0]) / wallLen;
+    const dirZ = (wall.end[1] - wall.start[1]) / wallLen;
+    for (const childId of wall.children) {
+      const child = nodes[childId];
+      if (!child || child.type !== "window") continue;
+      const window2 = child;
+      const localX = window2.position[0];
+      const width = window2.width ?? 1.5;
+      const wx = wall.start[0] + dirX * localX;
+      const wz = wall.start[1] + dirZ * localX;
+      for (const item of floorItems) {
+        const dim = getScaledDimensions(item);
+        const radius = Math.max(dim[0], dim[2]) / 2;
+        const distance = dist2D([wx, wz], [item.position[0], item.position[2]]);
+        if (distance < width / 2 + radius + 0.35) {
+          issues.push({
+            type: "overlap",
+            severity: "warning",
+            ruleId: "furniture.blocks_window",
+            nodeId: item.id,
+            message: `Furniture "${item.asset.name}" blocks access/daylight near a window.`
+          });
+        }
       }
     }
   }
@@ -17830,6 +17902,7 @@ function validateAndCorrectScene(levelId, codeProfile) {
   detectWallGaps(walls, issues, profile);
   detectDoorWindowOverlap(walls, nodes, issues);
   validateFurnitureCollision(items, issues);
+  validateFurnitureUseClearance(items, walls, nodes, issues, profile);
   validatePhysicsAndStructure(items, slabs, walls, nodes, issues);
   validateArchitectureDesign(items, slabs, walls, zones, nodes, issues, profile);
   checkCirculationAndSafety(levelId, walls, slabs, items, zones, nodes, issues, profile);
@@ -17955,11 +18028,14 @@ function repairHintForIssue(issue2) {
       };
     case "furniture.door_clearance":
     case "circulation.furniture_clear_path":
+    case "furniture.out_of_room_bounds":
+    case "furniture.use_clearance":
+    case "furniture.blocks_window":
       return {
         ruleId: issue2.ruleId,
         nodeId: issue2.nodeId,
-        preferredTools: ["move_nodes", "place_in_room", "place_against_wall"],
-        suggestedAction: "Move furniture away from doors and circulation paths before continuing decoration.",
+        preferredTools: ["place_furniture_solved", "suggest_furniture_layout", "move_nodes"],
+        suggestedAction: "Re-solve the furniture layout so items avoid room bounds, doors, windows, collisions, and use-clearance conflicts.",
         targetMetrics: { minClearanceMeters: 0.65 }
       };
     case "room.kitchen_ventilation":
@@ -18089,6 +18165,10 @@ function executeToolCall(name, args) {
         return createPolygonRoom(args);
       case "place_furniture":
         return placeFurniture(args);
+      case "suggest_furniture_layout":
+        return suggestFurnitureLayout(args);
+      case "place_furniture_solved":
+        return placeFurnitureSolved(args);
       case "place_in_room":
         return placeInRoom(args);
       case "place_against_wall":
@@ -18803,6 +18883,16 @@ function getSceneInfo() {
       area: room.area,
       shortSide: room.shortSide,
       bounds: room.bounds,
+      availableFurnitureZones: [room.bounds],
+      blockedZones: openingBlockedZones(levelId, {
+        polygon: slabPolygons.find((slab) => slab.id === room.slabId)?.polygon ?? [
+          [room.bounds.minX, room.bounds.minZ],
+          [room.bounds.maxX, room.bounds.minZ],
+          [room.bounds.maxX, room.bounds.maxZ],
+          [room.bounds.minX, room.bounds.maxZ]
+        ],
+        bounds: room.bounds
+      }).slice(0, 8),
       doorCount: room.doorCount,
       windowCount: room.windowCount,
       needsOpeningAttention: room.doorCount === 0 || windowCountNeedsAttention(room.roomType, room.windowCount)
@@ -19164,10 +19254,370 @@ function createPolygonRoom(args) {
 function findCatalogItem(id) {
   return CATALOG_ITEMS.find((item) => item.id === id) ?? null;
 }
+var DEFAULT_FURNITURE_METADATA = {
+  footprintRole: "decor",
+  preferredPlacement: ["center"],
+  frontClearance: 0.45,
+  sideClearance: 0.15
+};
+var FURNITURE_METADATA = {
+  "double-bed": { footprintRole: "sleeping", preferredPlacement: ["wall"], frontClearance: 0.7, sideClearance: 0.45, wallBacked: true },
+  "single-bed": { footprintRole: "sleeping", preferredPlacement: ["wall"], frontClearance: 0.65, sideClearance: 0.35, wallBacked: true },
+  bunkbed: { footprintRole: "sleeping", preferredPlacement: ["wall"], frontClearance: 0.65, sideClearance: 0.35, wallBacked: true },
+  sofa: { footprintRole: "seating", preferredPlacement: ["wall", "center"], frontClearance: 0.7, sideClearance: 0.25, wallBacked: true },
+  "lounge-chair": { footprintRole: "seating", preferredPlacement: ["wall", "corner"], frontClearance: 0.55, sideClearance: 0.2 },
+  "livingroom-chair": { footprintRole: "seating", preferredPlacement: ["wall", "center"], frontClearance: 0.55, sideClearance: 0.2 },
+  stool: { footprintRole: "seating", preferredPlacement: ["center", "corner"], frontClearance: 0.35, sideClearance: 0.15 },
+  "coffee-table": { footprintRole: "table", preferredPlacement: ["center"], frontClearance: 0.45, sideClearance: 0.25 },
+  "dining-table": { footprintRole: "table", preferredPlacement: ["center"], frontClearance: 0.8, sideClearance: 0.65 },
+  "dining-chair": { footprintRole: "seating", preferredPlacement: ["center"], frontClearance: 0.55, sideClearance: 0.2 },
+  "tv-stand": { footprintRole: "storage", preferredPlacement: ["wall"], frontClearance: 0.45, sideClearance: 0.15, wallBacked: true },
+  bookshelf: { footprintRole: "storage", preferredPlacement: ["wall"], frontClearance: 0.55, sideClearance: 0.15, wallBacked: true },
+  closet: { footprintRole: "storage", preferredPlacement: ["wall"], frontClearance: 0.65, sideClearance: 0.15, wallBacked: true },
+  dresser: { footprintRole: "storage", preferredPlacement: ["wall"], frontClearance: 0.55, sideClearance: 0.15, wallBacked: true },
+  shelf: { footprintRole: "storage", preferredPlacement: ["wall"], frontClearance: 0.45, sideClearance: 0.1, wallBacked: true },
+  "kitchen-counter": { footprintRole: "appliance", preferredPlacement: ["service-wall", "wall"], frontClearance: 0.8, sideClearance: 0.1, wallBacked: true },
+  "kitchen-cabinet": { footprintRole: "appliance", preferredPlacement: ["service-wall", "wall"], frontClearance: 0.75, sideClearance: 0.1, wallBacked: true },
+  kitchen: { footprintRole: "appliance", preferredPlacement: ["service-wall", "wall"], frontClearance: 0.8, sideClearance: 0.1, wallBacked: true },
+  stove: { footprintRole: "appliance", preferredPlacement: ["service-wall", "wall"], frontClearance: 0.8, sideClearance: 0.15, wallBacked: true },
+  fridge: { footprintRole: "appliance", preferredPlacement: ["service-wall", "wall", "corner"], frontClearance: 0.8, sideClearance: 0.15, wallBacked: true },
+  microwave: { footprintRole: "appliance", preferredPlacement: ["wall"], frontClearance: 0.55, sideClearance: 0.1, wallBacked: true },
+  toilet: { footprintRole: "sanitary", preferredPlacement: ["service-wall", "wall"], frontClearance: 0.65, sideClearance: 0.2, wallBacked: true },
+  bathtub: { footprintRole: "sanitary", preferredPlacement: ["service-wall", "wall", "corner"], frontClearance: 0.65, sideClearance: 0.1, wallBacked: true },
+  "bathroom-sink": { footprintRole: "sanitary", preferredPlacement: ["service-wall", "wall"], frontClearance: 0.65, sideClearance: 0.15, wallBacked: true },
+  "shower-square": { footprintRole: "sanitary", preferredPlacement: ["corner", "service-wall"], frontClearance: 0.6, sideClearance: 0.05, wallBacked: true },
+  "shower-angle": { footprintRole: "sanitary", preferredPlacement: ["corner", "service-wall"], frontClearance: 0.6, sideClearance: 0.05, wallBacked: true },
+  "washing-machine": { footprintRole: "appliance", preferredPlacement: ["service-wall", "wall"], frontClearance: 0.7, sideClearance: 0.1, wallBacked: true },
+  "floor-lamp": { footprintRole: "lighting", preferredPlacement: ["corner"], frontClearance: 0.25, sideClearance: 0.1 },
+  "indoor-plant": { footprintRole: "decor", preferredPlacement: ["corner"], frontClearance: 0.25, sideClearance: 0.1 },
+  "small-indoor-plant": { footprintRole: "decor", preferredPlacement: ["corner"], frontClearance: 0.2, sideClearance: 0.05 },
+  cactus: { footprintRole: "decor", preferredPlacement: ["corner"], frontClearance: 0.2, sideClearance: 0.05 }
+};
+function furnitureMetadata(itemId) {
+  return FURNITURE_METADATA[itemId] ?? DEFAULT_FURNITURE_METADATA;
+}
 function getFloorItems() {
   return CATALOG_ITEMS.filter(
     (item) => !item.attachTo || item.attachTo === void 0
   );
+}
+function bboxForItem(position, dimensions, rotationDeg) {
+  const rot = (Math.round(rotationDeg) % 360 + 360) % 360;
+  const isRotated = rot === 90 || rot === 270;
+  const worldW = isRotated ? dimensions[2] : dimensions[0];
+  const worldD = isRotated ? dimensions[0] : dimensions[2];
+  return {
+    minX: round3(position[0] - worldW / 2),
+    minZ: round3(position[2] - worldD / 2),
+    maxX: round3(position[0] + worldW / 2),
+    maxZ: round3(position[2] + worldD / 2)
+  };
+}
+function expandBBox(bbox, amount) {
+  return {
+    minX: round3(bbox.minX - amount),
+    minZ: round3(bbox.minZ - amount),
+    maxX: round3(bbox.maxX + amount),
+    maxZ: round3(bbox.maxZ + amount)
+  };
+}
+function bboxOverlaps(a, b) {
+  return a.maxX > b.minX && a.minX < b.maxX && a.maxZ > b.minZ && a.minZ < b.maxZ;
+}
+function bboxInsideBounds(bbox, bounds, margin = 0) {
+  return bbox.minX >= bounds.minX + margin && bbox.maxX <= bounds.maxX - margin && bbox.minZ >= bounds.minZ + margin && bbox.maxZ <= bounds.maxZ - margin;
+}
+function bboxCornersInsidePolygon(bbox, polygon, margin = 0) {
+  return [
+    [bbox.minX + margin, bbox.minZ + margin],
+    [bbox.maxX - margin, bbox.minZ + margin],
+    [bbox.maxX - margin, bbox.maxZ - margin],
+    [bbox.minX + margin, bbox.maxZ - margin]
+  ].every(([x, z2]) => pointInPolygonSimple(x, z2, polygon));
+}
+function boundsFromRoomArgs(args) {
+  const slabId = args.slabId;
+  const { nodes } = use_scene_default.getState();
+  if (slabId) {
+    const slab = nodes[slabId];
+    if (slab?.polygon && slab.polygon.length >= 3) {
+      return { slabId, polygon: slab.polygon, bounds: polygonBounds2(slab.polygon) };
+    }
+    return null;
+  }
+  const roomOrigin = args.roomOrigin ?? args.origin;
+  const roomWidth = args.roomWidth ?? args.width;
+  const roomDepth = args.roomDepth ?? args.depth;
+  const wallThickness = args.wallThickness ?? 0.15;
+  if (!roomOrigin || !roomWidth || !roomDepth) return null;
+  const t = wallThickness / 2;
+  const polygon = [
+    [roomOrigin[0] + t, roomOrigin[1] + t],
+    [roomOrigin[0] + roomWidth - t, roomOrigin[1] + t],
+    [roomOrigin[0] + roomWidth - t, roomOrigin[1] + roomDepth - t],
+    [roomOrigin[0] + t, roomOrigin[1] + roomDepth - t]
+  ];
+  return { polygon, bounds: polygonBounds2(polygon) };
+}
+function existingFloorItemBBoxes(levelId, extra = []) {
+  const boxes = [];
+  const { nodes } = use_scene_default.getState();
+  for (const node of Object.values(nodes)) {
+    if (node.type !== "item") continue;
+    if (node.parentId !== levelId && !isChildOfLevel(node, nodes, levelId)) continue;
+    const item = node;
+    if (item.asset.attachTo === "wall" || item.asset.attachTo === "wall-side" || item.asset.attachTo === "ceiling") continue;
+    const dims = item.asset.dimensions ?? [1, 1, 1];
+    const rotationDeg = Math.round((item.rotation?.[1] ?? 0) * 180 / Math.PI);
+    boxes.push({ ...expandBBox(bboxForItem(item.position, dims, rotationDeg), 0.05), reason: "existing_furniture", nodeId: item.id });
+  }
+  for (const placement of extra) {
+    boxes.push({ ...expandBBox(placement.bbox, 0.05), reason: "planned_furniture" });
+  }
+  return boxes;
+}
+function openingBlockedZones(levelId, room) {
+  const zones = [];
+  const { nodes } = use_scene_default.getState();
+  for (const node of Object.values(nodes)) {
+    if (node.type !== "wall") continue;
+    if (node.parentId !== levelId && !isChildOfLevel(node, nodes, levelId)) continue;
+    const wall = node;
+    const wallLen = Math.sqrt((wall.end[0] - wall.start[0]) ** 2 + (wall.end[1] - wall.start[1]) ** 2);
+    if (wallLen < 0.01) continue;
+    const dirX = (wall.end[0] - wall.start[0]) / wallLen;
+    const dirZ = (wall.end[1] - wall.start[1]) / wallLen;
+    const normX = -dirZ;
+    const normZ = dirX;
+    const center = [(room.bounds.minX + room.bounds.maxX) / 2, (room.bounds.minZ + room.bounds.maxZ) / 2];
+    const mid = [(wall.start[0] + wall.end[0]) / 2, (wall.start[1] + wall.end[1]) / 2];
+    const dot = (center[0] - mid[0]) * normX + (center[1] - mid[1]) * normZ;
+    const insideSign = dot >= 0 ? 1 : -1;
+    for (const childId of wall.children ?? []) {
+      const child = nodes[childId];
+      if (!child || child.type !== "door" && child.type !== "window") continue;
+      const opening = child;
+      const localX = opening.position[0];
+      const width = opening.width ?? (child.type === "door" ? 0.9 : 1.5);
+      const centerX = wall.start[0] + dirX * localX;
+      const centerZ = wall.start[1] + dirZ * localX;
+      const along = width / 2 + 0.25;
+      const depth = child.type === "door" ? 0.9 : 0.45;
+      const p1 = [centerX - dirX * along, centerZ - dirZ * along];
+      const p2 = [centerX + dirX * along, centerZ + dirZ * along];
+      const p3 = [p2[0] + normX * insideSign * depth, p2[1] + normZ * insideSign * depth];
+      const p4 = [p1[0] + normX * insideSign * depth, p1[1] + normZ * insideSign * depth];
+      const xs = [p1[0], p2[0], p3[0], p4[0]];
+      const zs = [p1[1], p2[1], p3[1], p4[1]];
+      zones.push({
+        minX: round3(Math.min(...xs)),
+        minZ: round3(Math.min(...zs)),
+        maxX: round3(Math.max(...xs)),
+        maxZ: round3(Math.max(...zs)),
+        reason: child.type === "door" ? "door_clearance" : "window_access",
+        nodeId: child.id
+      });
+    }
+  }
+  return zones;
+}
+function candidateAnchorsForPlacement(bounds, placement) {
+  const cx = (bounds.minX + bounds.maxX) / 2;
+  const cz = (bounds.minZ + bounds.maxZ) / 2;
+  const left = bounds.minX;
+  const right = bounds.maxX;
+  const south = bounds.minZ;
+  const north = bounds.maxZ;
+  if (placement === "center") {
+    return [
+      { x: cx, z: cz, rotation: 0, placement: "center" },
+      { x: cx, z: cz, rotation: 90, placement: "center-rotated" }
+    ];
+  }
+  if (placement === "corner") {
+    return [
+      { x: left, z: south, rotation: 45, placement: "southwest-corner" },
+      { x: right, z: south, rotation: 315, placement: "southeast-corner" },
+      { x: left, z: north, rotation: 135, placement: "northwest-corner" },
+      { x: right, z: north, rotation: 225, placement: "northeast-corner" }
+    ];
+  }
+  return [
+    { x: cx, z: south, rotation: 180, placement: "south-wall" },
+    { x: cx, z: north, rotation: 0, placement: "north-wall" },
+    { x: left, z: cz, rotation: 270, placement: "west-wall" },
+    { x: right, z: cz, rotation: 90, placement: "east-wall" }
+  ];
+}
+function shiftCandidateInside(anchor, dims, metadata, bounds) {
+  const bboxAtAnchor = bboxForItem([anchor.x, 0, anchor.z], dims, anchor.rotation);
+  let x = anchor.x;
+  let z2 = anchor.z;
+  if (bboxAtAnchor.minX < bounds.minX + metadata.sideClearance) x += bounds.minX + metadata.sideClearance - bboxAtAnchor.minX;
+  if (bboxAtAnchor.maxX > bounds.maxX - metadata.sideClearance) x -= bboxAtAnchor.maxX - (bounds.maxX - metadata.sideClearance);
+  if (bboxAtAnchor.minZ < bounds.minZ + metadata.sideClearance) z2 += bounds.minZ + metadata.sideClearance - bboxAtAnchor.minZ;
+  if (bboxAtAnchor.maxZ > bounds.maxZ - metadata.sideClearance) z2 -= bboxAtAnchor.maxZ - (bounds.maxZ - metadata.sideClearance);
+  return [round3(x), 0, round3(z2)];
+}
+function gridFallbackAnchors(bounds) {
+  const anchors = [];
+  const cols = 5;
+  const rows = 5;
+  for (let ix = 1; ix < cols; ix++) {
+    for (let iz = 1; iz < rows; iz++) {
+      const x = bounds.minX + ix / cols * (bounds.maxX - bounds.minX);
+      const z2 = bounds.minZ + iz / rows * (bounds.maxZ - bounds.minZ);
+      anchors.push({ x, z: z2, rotation: 0, placement: "grid" });
+      anchors.push({ x, z: z2, rotation: 90, placement: "grid-rotated" });
+    }
+  }
+  return anchors;
+}
+function solveSingleFurniture(itemId, room, roomType, planned, preferredAnchors) {
+  const catalogEntry = findCatalogItem(itemId);
+  if (!catalogEntry) {
+    return { placement: null, rejections: [{ itemId, reasons: [`Unknown item "${itemId}"`] }], blockedZones: [] };
+  }
+  const dims = catalogEntry.dimensions ?? [1, 1, 1];
+  const metadata = furnitureMetadata(itemId);
+  const levelId = getLevelId();
+  const blockedZones = [
+    ...existingFloorItemBBoxes(levelId, planned),
+    ...openingBlockedZones(levelId, room)
+  ];
+  const anchors = [
+    ...preferredAnchors ?? [],
+    ...metadata.preferredPlacement.flatMap((placement) => candidateAnchorsForPlacement(room.bounds, placement)),
+    ...gridFallbackAnchors(room.bounds)
+  ];
+  const rejections = [];
+  let best = null;
+  for (const anchor of anchors) {
+    const position = shiftCandidateInside(anchor, dims, metadata, room.bounds);
+    const bbox = bboxForItem(position, dims, anchor.rotation);
+    const reasons = [];
+    if (!bboxInsideBounds(bbox, room.bounds, 0.02) || !bboxCornersInsidePolygon(bbox, room.polygon, 0.02)) {
+      reasons.push("out_of_room_bounds");
+    }
+    for (const blocked of blockedZones) {
+      if (bboxOverlaps(expandBBox(bbox, metadata.sideClearance), blocked)) {
+        reasons.push(`blocked_by_${blocked.reason}`);
+      }
+    }
+    const useBBox = expandBBox(bbox, metadata.frontClearance);
+    for (const blocked of blockedZones) {
+      if (bboxOverlaps(useBBox, blocked)) {
+        reasons.push(`use_clearance_conflict_${blocked.reason}`);
+      }
+    }
+    if (metadata.wallBacked && anchor.placement.includes("grid")) {
+      reasons.push("requires_wall_backing");
+    }
+    if (reasons.length > 0) {
+      rejections.push({ itemId, position, rotation: anchor.rotation, reasons: Array.from(new Set(reasons)) });
+      continue;
+    }
+    const centerBias = 1 - (Math.abs(position[0] - (room.bounds.minX + room.bounds.maxX) / 2) + Math.abs(position[2] - (room.bounds.minZ + room.bounds.maxZ) / 2)) / Math.max(0.01, room.bounds.maxX - room.bounds.minX + (room.bounds.maxZ - room.bounds.minZ));
+    const wallBonus = metadata.wallBacked && !anchor.placement.includes("grid") ? 0.4 : 0;
+    const roleBonus = roomType === "living" && itemId === "sofa" && anchor.placement.includes("north") ? 0.2 : 0;
+    const clearanceScore = Math.max(0, 1 - blockedZones.filter((blocked) => bboxOverlaps(expandBBox(bbox, metadata.frontClearance), expandBBox(blocked, 0.1))).length * 0.2);
+    const score = round3(centerBias + wallBonus + roleBonus + clearanceScore);
+    const candidate = {
+      itemId,
+      position,
+      rotation: anchor.rotation,
+      bbox,
+      score,
+      clearanceScore: round3(clearanceScore),
+      placement: anchor.placement
+    };
+    if (!best || candidate.score > best.score) best = candidate;
+  }
+  return { placement: best, rejections, blockedZones };
+}
+function defaultFurnitureForRoom(roomType) {
+  if (roomType === "bedroom") return ["double-bed", "bedside-table", "closet"];
+  if (roomType === "living") return ["tv-stand", "sofa", "coffee-table"];
+  if (roomType === "kitchen") return ["kitchen-counter", "fridge", "stove"];
+  if (roomType === "bathroom") return ["toilet", "bathroom-sink", "shower-square"];
+  if (roomType === "dining") return ["dining-table", "dining-chair", "dining-chair"];
+  if (roomType === "office") return ["office-table", "office-chair", "bookshelf"];
+  return ["sofa", "coffee-table"];
+}
+function solveFurnitureLayout(args) {
+  const room = boundsFromRoomArgs(args);
+  const roomType = (args.roomType ?? "living").toLowerCase();
+  if (!room) {
+    return {
+      success: false,
+      roomType,
+      roomBounds: { minX: 0, minZ: 0, maxX: 0, maxZ: 0 },
+      availableFurnitureZones: [],
+      blockedZones: [],
+      placements: [],
+      rejections: [{ itemId: "room", reasons: ["room bounds unresolved; provide slabId or roomOrigin/roomWidth/roomDepth"] }],
+      suggestedNextTools: ["get_scene_info", "suggest_furniture_layout"]
+    };
+  }
+  const requested = args.items;
+  const itemIds = Array.isArray(requested) && requested.length > 0 ? requested.map((item) => typeof item === "string" ? item : isRecordLike(item) ? String(item.type ?? item.itemId ?? "") : "").filter(Boolean) : defaultFurnitureForRoom(roomType);
+  const placements = [];
+  const rejections = [];
+  let blockedZones = openingBlockedZones(getLevelId(), room);
+  for (const itemId of itemIds) {
+    let solve = solveSingleFurniture(itemId, room, roomType, placements);
+    if (!solve.placement && SMALL_ROOM_SUBSTITUTIONS[itemId]) {
+      solve = solveSingleFurniture(SMALL_ROOM_SUBSTITUTIONS[itemId], room, roomType, placements);
+      if (solve.placement) {
+        rejections.push({ itemId, reasons: [`substituted_with_${SMALL_ROOM_SUBSTITUTIONS[itemId]}`] });
+      }
+    }
+    blockedZones = solve.blockedZones;
+    if (solve.placement) placements.push(solve.placement);
+    else rejections.push(...solve.rejections.slice(0, 6));
+  }
+  return {
+    success: placements.length > 0,
+    roomType,
+    slabId: room.slabId,
+    roomBounds: room.bounds,
+    availableFurnitureZones: [room.bounds],
+    blockedZones,
+    placements,
+    rejections,
+    suggestedNextTools: placements.length > 0 ? ["place_furniture_solved", "validate_scene"] : ["suggest_furniture_layout", "create_room"]
+  };
+}
+function suggestFurnitureLayout(args) {
+  const result = solveFurnitureLayout(args);
+  return JSON.stringify(result);
+}
+function placeFurnitureSolved(args) {
+  const solve = solveFurnitureLayout(args);
+  if (solve.placements.length === 0) {
+    return JSON.stringify({
+      ...solve,
+      success: false,
+      error: "No feasible furniture placements found"
+    });
+  }
+  const created = [];
+  for (const placement of solve.placements) {
+    const result = JSON.parse(placeFurniture({
+      type: placement.itemId,
+      position: placement.position,
+      rotation: placement.rotation
+    }));
+    created.push(result);
+  }
+  return JSON.stringify({
+    ...solve,
+    success: created.length > 0,
+    created,
+    createdNodeIds: compactIds(created.map((result) => isRecordLike(result) ? result.itemId : void 0)),
+    createdByType: { item: compactIds(created.map((result) => isRecordLike(result) ? result.itemId : void 0)) },
+    suggestedNextTools: ["validate_scene", "suggest_furniture_layout"]
+  });
 }
 function placeFurniture(args) {
   const levelId = getLevelId();
@@ -19349,9 +19799,44 @@ function placeInRoom(args) {
   else x = minCX + dx * (maxCX - minCX);
   if (maxCZ <= minCZ) z2 = (minZ + maxZ) / 2;
   else z2 = minCZ + dz * (maxCZ - minCZ);
+  const targetPosition = [round3(x), 0, round3(z2)];
+  const room = boundsFromRoomArgs({
+    ...args,
+    ...slabId ? { slabId } : {},
+    ...roomOrigin && roomWidth && roomDepth ? { roomOrigin, roomWidth, roomDepth, wallThickness } : {}
+  });
+  if (room) {
+    const solved = solveSingleFurniture(itemType, room, String(args.roomType ?? "living"), [], [{
+      x: targetPosition[0],
+      z: targetPosition[2],
+      rotation: rotDeg,
+      placement: `requested-${anchor}`
+    }]);
+    if (solved.placement) {
+      const result = JSON.parse(placeFurniture({
+        type: itemType,
+        position: solved.placement.position,
+        rotation: solved.placement.rotation
+      }));
+      return JSON.stringify({
+        ...result,
+        solverAdjusted: solved.placement.position[0] !== targetPosition[0] || solved.placement.position[2] !== targetPosition[2] || solved.placement.rotation !== rotDeg,
+        requestedPosition: targetPosition,
+        solverPlacement: solved.placement,
+        rejections: solved.rejections.slice(0, 5)
+      });
+    }
+    return JSON.stringify({
+      success: false,
+      error: "Requested semantic furniture position is not feasible",
+      requestedPosition: targetPosition,
+      rejections: solved.rejections.slice(0, 8),
+      suggestedNextTools: ["suggest_furniture_layout", "place_furniture_solved"]
+    });
+  }
   return placeFurniture({
     type: itemType,
-    position: [round3(x), 0, round3(z2)],
+    position: targetPosition,
     rotation: rotDeg
   });
 }
@@ -19403,11 +19888,38 @@ function placeAgainstWall(args) {
   }
   const x = round3(alongX + normX * perpDist);
   const z2 = round3(alongZ + normZ * perpDist);
-  return placeFurniture({
-    type: itemType,
-    position: [x, 0, z2],
-    rotation: Math.round(rotDeg)
-  });
+  const targetPosition = [x, 0, z2];
+  const room = boundsFromRoomArgs(args);
+  if (room) {
+    const solved = solveSingleFurniture(itemType, room, String(args.roomType ?? "living"), [], [{
+      x,
+      z: z2,
+      rotation: Math.round(rotDeg),
+      placement: `requested-wall-${wallId}`
+    }]);
+    if (solved.placement) {
+      const result = JSON.parse(placeFurniture({
+        type: itemType,
+        position: solved.placement.position,
+        rotation: solved.placement.rotation
+      }));
+      return JSON.stringify({
+        ...result,
+        solverAdjusted: solved.placement.position[0] !== targetPosition[0] || solved.placement.position[2] !== targetPosition[2] || solved.placement.rotation !== Math.round(rotDeg),
+        requestedPosition: targetPosition,
+        solverPlacement: solved.placement,
+        rejections: solved.rejections.slice(0, 5)
+      });
+    }
+    return JSON.stringify({
+      success: false,
+      error: "Requested wall furniture position is not feasible",
+      requestedPosition: targetPosition,
+      rejections: solved.rejections.slice(0, 8),
+      suggestedNextTools: ["suggest_furniture_layout", "place_furniture_solved"]
+    });
+  }
+  return placeFurniture({ type: itemType, position: targetPosition, rotation: Math.round(rotDeg) });
 }
 var ROOM_FURNITURE_PRESETS = {
   bedroom: [
@@ -19526,63 +20038,24 @@ var SMALL_ROOM_SUBSTITUTIONS = {
   "indoor-plant": "small-indoor-plant",
   "ironing-board": "laundry-bag"
 };
-var SMALL_ROOM_AREA_THRESHOLD = 6;
 function furnishRoom(args) {
   const roomType = args.roomType ?? "living";
   const origin = args.origin ?? [0, 0];
   const width = args.width ?? 5;
   const depth = args.depth ?? 4;
   const wallThickness = args.wallThickness ?? 0.15;
-  const preset = ROOM_FURNITURE_PRESETS[roomType];
-  if (!preset) {
-    const available = Object.keys(ROOM_FURNITURE_PRESETS).join(", ");
-    return JSON.stringify({
-      error: `Unknown room type "${roomType}". Available: ${available}`
-    });
-  }
-  const gap = 0.05;
-  const interiorArea = (width - wallThickness) * (depth - wallThickness);
-  const useSmallSubs = interiorArea < SMALL_ROOM_AREA_THRESHOLD;
-  const placed = [];
-  for (const presetItem of preset) {
-    let itemType = presetItem.type;
-    if (useSmallSubs && SMALL_ROOM_SUBSTITUTIONS[itemType]) {
-      itemType = SMALL_ROOM_SUBSTITUTIONS[itemType];
-    }
-    const catalogEntry = findCatalogItem(itemType);
-    if (!catalogEntry) continue;
-    const dims = catalogEntry.dimensions ?? [1, 1, 1];
-    const rot = (presetItem.rotation % 360 + 360) % 360;
-    const isRotated = rot === 90 || rot === 270;
-    const fw = isRotated ? dims[2] : dims[0];
-    const fd = isRotated ? dims[0] : dims[2];
-    const halfT2 = wallThickness / 2;
-    const minCenterX = origin[0] + halfT2 + fw / 2 + gap;
-    const maxCenterX = origin[0] + width - halfT2 - fw / 2 - gap;
-    const minCenterZ = origin[1] + halfT2 + fd / 2 + gap;
-    const maxCenterZ = origin[1] + depth - halfT2 - fd / 2 - gap;
-    let x;
-    let z2;
-    if (maxCenterX <= minCenterX) {
-      x = origin[0] + width / 2;
-    } else {
-      x = minCenterX + presetItem.dx * (maxCenterX - minCenterX);
-    }
-    if (maxCenterZ <= minCenterZ) {
-      z2 = origin[1] + depth / 2;
-    } else {
-      z2 = minCenterZ + presetItem.dz * (maxCenterZ - minCenterZ);
-    }
-    const result = JSON.parse(
-      placeFurniture({
-        type: itemType,
-        position: [x, 0, z2],
-        rotation: presetItem.rotation
-      })
-    );
-    placed.push(result);
-  }
+  const items = args.items ?? defaultFurnitureForRoom(roomType);
+  const solved = JSON.parse(placeFurnitureSolved({
+    ...args,
+    roomType,
+    items,
+    roomOrigin: origin,
+    roomWidth: width,
+    roomDepth: depth,
+    wallThickness
+  }));
   const halfT = wallThickness / 2;
+  const gap = 0.05;
   const roomSpatial = {
     roomBounds: {
       minX: round3(origin[0]),
@@ -19598,11 +20071,17 @@ function furnishRoom(args) {
     }
   };
   return JSON.stringify({
-    success: true,
+    success: Boolean(solved.success),
     roomType,
-    itemsPlaced: placed.length,
-    items: placed,
-    roomSpatial
+    itemsPlaced: Array.isArray(solved.created) ? solved.created.length : 0,
+    items: solved.created ?? [],
+    solver: {
+      placements: solved.placements ?? [],
+      rejections: solved.rejections ?? [],
+      blockedZones: solved.blockedZones ?? []
+    },
+    roomSpatial,
+    suggestedNextTools: ["validate_scene", "suggest_furniture_layout"]
   });
 }
 function createHallway(args) {
@@ -20541,9 +21020,11 @@ The executor may block or defer a tool call:
 | Build staircase between levels | \`build_staircase\` |
 | Add door during room creation | Set \`addDoor: true\` in create_room |
 | Add ceiling to room | Set \`addCeiling: true\` in create_room |
-| Place furniture by coordinates | \`place_furniture\` |
-| Place furniture by semantic anchor (north-wall, center\u2026) | \`place_in_room\` \u2B50 preferred |
-| Place furniture flush against a specific wall | \`place_against_wall\` \u2B50 preferred |
+| Preview furniture layout without creating nodes | \`suggest_furniture_layout\` \u2B50 preferred |
+| Place furniture with spatial solver | \`place_furniture_solved\` \u2B50 preferred |
+| Place furniture by coordinates | \`place_furniture\` fallback only |
+| Place furniture by semantic anchor (north-wall, center\u2026) | \`place_in_room\` |
+| Place furniture flush against a specific wall | \`place_against_wall\` |
 | Auto-furnish entire room | \`furnish_room\` |
 | Create corridor / hallway | \`create_hallway\` |
 | Complete building (walls+slab+ceiling+roof) | \`create_building_shell\` |
@@ -20605,6 +21086,11 @@ Every room/furniture tool now returns **spatial context** \u2014 use it instead 
   - \`wallsByFace\`: {south, east, north, west} with wall IDs, endpoints, length
   - \`slabPolygon\`: actual slab vertices
 
+- \`suggest_furniture_layout\` / \`place_furniture_solved\` return:
+  - \`placements\`: feasible furniture positions with rotation, bbox, score, clearanceScore
+  - \`blockedZones\`: door/window/existing-furniture zones the solver avoided
+  - \`rejections\`: structured reasons when an item cannot fit
+
 - \`place_furniture\` / \`place_in_room\` / \`place_against_wall\` return:
   - \`bbox\`: actual world-space bounding box {minX, minZ, maxX, maxZ}
   - \`insideSlabId\`: which room slab contains the item (null = outside all rooms!)
@@ -20616,18 +21102,24 @@ Every room/furniture tool now returns **spatial context** \u2014 use it instead 
 
 **Always check \`insideSlabId\` and \`warning\` in placement results.** If an item is outside a room, fix it immediately.
 
-### Semantic Placement (preferred over raw coordinates)
+### Furniture Solver (preferred over raw coordinates)
 
-When placing individual furniture items, **prefer \`place_in_room\` and \`place_against_wall\`** over \`place_furniture\`:
+When placing furniture, **prefer \`suggest_furniture_layout\`, \`place_furniture_solved\`, or \`furnish_room\`**. Use raw \`place_furniture\` only when the user explicitly gives exact coordinates.
 
 \`\`\`
 // \u274C Error-prone: manually computing coordinates
 place_furniture({ type: "double-bed", position: [5.75, 0, 3.3], rotation: 0 })
 
-// \u2705 Reliable: semantic anchor \u2014 system computes exact position
+// \u2705 Best: solver avoids doors, windows, existing furniture, and circulation conflicts
+place_furniture_solved({ roomType: "bedroom", slabId: "slab_abc", items: ["double-bed", "bedside-table", "closet"] })
+
+// \u2705 Preview only: use before creating furniture when unsure
+suggest_furniture_layout({ roomType: "living", slabId: "slab_abc" })
+
+// \u2705 Semantic anchor \u2014 system validates or adjusts the target
 place_in_room({ type: "double-bed", anchor: "north-wall", orientation: "facing-south", roomOrigin: [4, 0], roomWidth: 3.5, roomDepth: 4 })
 
-// \u2705 Wall-relative \u2014 system computes perpendicular offset
+// \u2705 Wall-relative \u2014 system validates or adjusts the target
 place_against_wall({ type: "bookshelf", wallId: "wall_abc", position_t: 0.3, facing: "toward-wall" })
 \`\`\`
 
@@ -21637,7 +22129,7 @@ var agentTools = [
     type: "function",
     function: {
       name: "place_furniture",
-      description: "Place a furniture item from the catalog on the current level. Each item has a real 3D model. Available IDs: sofa, lounge-chair, livingroom-chair, stool, coffee-table, tv-stand, bookshelf, floor-lamp, ceiling-lamp, recessed-light, table-lamp, rectangular-carpet, round-carpet, indoor-plant, small-indoor-plant, cactus, double-bed, single-bed, bunkbed, bedside-table, closet, dresser, dining-table, dining-chair, office-table, office-chair, kitchen-counter, kitchen-cabinet, kitchen, stove, fridge, microwave, toilet, bathtub, bathroom-sink, shower-square, shower-angle, washing-machine, television, computer, stairs, column, piano, pool-table, coat-rack, trash-bin, picture, round-mirror, shelf. Use list_furniture to see all items with dimensions.",
+      description: "Low-level fallback: place a furniture item at exact coordinates. Prefer suggest_furniture_layout, place_furniture_solved, place_in_room, place_against_wall, or furnish_room so the solver can avoid walls, doors, windows, collisions, and circulation conflicts. Available IDs: sofa, lounge-chair, livingroom-chair, stool, coffee-table, tv-stand, bookshelf, floor-lamp, ceiling-lamp, recessed-light, table-lamp, rectangular-carpet, round-carpet, indoor-plant, small-indoor-plant, cactus, double-bed, single-bed, bunkbed, bedside-table, closet, dresser, dining-table, dining-chair, office-table, office-chair, kitchen-counter, kitchen-cabinet, kitchen, stove, fridge, microwave, toilet, bathtub, bathroom-sink, shower-square, shower-angle, washing-machine, television, computer, stairs, column, piano, pool-table, coat-rack, trash-bin, picture, round-mirror, shelf.",
       parameters: {
         type: "object",
         properties: {
@@ -21658,6 +22150,93 @@ var agentTools = [
           }
         },
         required: ["type"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "suggest_furniture_layout",
+      description: "Solve furniture placement without creating nodes. Uses room/slab bounds, existing furniture, doors, windows, clearance zones, and room type to return feasible placements, scores, blocked zones, and structured rejection reasons. Use before placing furniture when layout quality matters.",
+      parameters: {
+        type: "object",
+        properties: {
+          roomType: {
+            type: "string",
+            enum: ["bedroom", "living", "kitchen", "bathroom", "dining", "office", "entryway", "balcony", "kids", "laundry", "gym", "guest"],
+            description: "Semantic room type used to choose default furniture and placement rules."
+          },
+          items: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional catalog item IDs to solve. If omitted, defaults are chosen from roomType."
+          },
+          slabId: {
+            type: "string",
+            description: "Preferred: slab ID for the room to furnish."
+          },
+          roomOrigin: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 2,
+            maxItems: 2,
+            description: "Fallback room bottom-left [x, z] when slabId is not available."
+          },
+          roomWidth: { type: "number", description: "Fallback room width in meters." },
+          roomDepth: { type: "number", description: "Fallback room depth in meters." },
+          wallThickness: {
+            type: "number",
+            description: "Wall thickness in meters for fallback room bounds (default: 0.15)."
+          },
+          codeProfile: {
+            type: "string",
+            enum: ["residential_default", "china_residential"],
+            description: "Optional profile for clearance expectations. Defaults to residential_default."
+          }
+        },
+        required: ["roomType"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "place_furniture_solved",
+      description: "Create furniture using the deterministic spatial solver. It avoids room bounds, doors, windows, existing furniture, and circulation conflicts, and returns placements plus rejection reasons. Prefer this over raw place_furniture for multi-item or code-sensitive furnishing.",
+      parameters: {
+        type: "object",
+        properties: {
+          roomType: {
+            type: "string",
+            enum: ["bedroom", "living", "kitchen", "bathroom", "dining", "office", "entryway", "balcony", "kids", "laundry", "gym", "guest"],
+            description: "Semantic room type used to choose default furniture and placement rules."
+          },
+          items: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional catalog item IDs to create. If omitted, defaults are chosen from roomType."
+          },
+          slabId: { type: "string", description: "Preferred: slab ID for the room to furnish." },
+          roomOrigin: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 2,
+            maxItems: 2,
+            description: "Fallback room bottom-left [x, z] when slabId is not available."
+          },
+          roomWidth: { type: "number", description: "Fallback room width in meters." },
+          roomDepth: { type: "number", description: "Fallback room depth in meters." },
+          wallThickness: {
+            type: "number",
+            description: "Wall thickness in meters for fallback room bounds (default: 0.15)."
+          },
+          codeProfile: {
+            type: "string",
+            enum: ["residential_default", "china_residential"],
+            description: "Optional profile for clearance expectations. Defaults to residential_default."
+          }
+        },
+        required: ["roomType"]
       }
     }
   },
@@ -22990,6 +23569,10 @@ function evaluateAssertion(assertion, steps, validation) {
       return assertNoSlabOverlap();
     case "geometry.openingsFitWall":
       return assertOpeningsFitWall();
+    case "geometry.furnitureInsideSlabs":
+      return assertFurnitureInsideSlabs();
+    case "geometry.noFurnitureOverlap":
+      return assertNoFurnitureOverlap(assertion.clearance ?? 0);
     case "validation.repairHints":
       return assertValidationRepairHints(assertion, validation);
     case "validation":
@@ -23212,6 +23795,49 @@ function assertOpeningsFitWall() {
     message: `openings fit walls expected, violations: ${violations.length ? violations.join(", ") : "none"}`
   };
 }
+function assertFurnitureInsideSlabs() {
+  const nodes = use_scene_default.getState().nodes;
+  const slabs = nodesByType(nodes, "slab");
+  const items = nodesByType(nodes, "item");
+  const violations = [];
+  for (const item of items) {
+    const attachTo = item.asset?.attachTo;
+    if (attachTo === "wall" || attachTo === "wall-side" || attachTo === "ceiling") continue;
+    if (!item.position || !item.asset?.dimensions) continue;
+    const rotationDeg = Math.round((item.rotation?.[1] ?? 0) * 180 / Math.PI);
+    const bbox = itemBboxForHarness(item.position, item.asset.dimensions, rotationDeg);
+    const inside = slabs.some((slab) => slab.polygon && bboxCornersInsidePolygonForHarness(bbox, slab.polygon));
+    if (!inside) violations.push(item.id);
+  }
+  return {
+    pass: violations.length === 0,
+    type: "geometry.furnitureInsideSlabs",
+    message: `all furniture bbox corners inside slabs expected, violations: ${violations.length ? violations.join(", ") : "none"}`
+  };
+}
+function assertNoFurnitureOverlap(clearance) {
+  const nodes = use_scene_default.getState().nodes;
+  const items = nodesByType(nodes, "item");
+  const floorItems = items.filter((item) => {
+    const attachTo = item.asset?.attachTo;
+    return attachTo !== "wall" && attachTo !== "wall-side" && attachTo !== "ceiling" && item.position && item.asset?.dimensions;
+  });
+  const violations = [];
+  for (let i = 0; i < floorItems.length; i++) {
+    for (let j = i + 1; j < floorItems.length; j++) {
+      const a = floorItems[i];
+      const b = floorItems[j];
+      const aBox = expandBboxForHarness(itemBboxForHarness(a.position, a.asset.dimensions, Math.round((a.rotation?.[1] ?? 0) * 180 / Math.PI)), clearance);
+      const bBox = itemBboxForHarness(b.position, b.asset.dimensions, Math.round((b.rotation?.[1] ?? 0) * 180 / Math.PI));
+      if (bboxesOverlapForHarness(aBox, bBox)) violations.push(`${a.id}<->${b.id}`);
+    }
+  }
+  return {
+    pass: violations.length === 0,
+    type: "geometry.noFurnitureOverlap",
+    message: `no furniture overlap expected, violations: ${violations.length ? violations.join(", ") : "none"}`
+  };
+}
 function assertValidation(assertion, validation) {
   if (!isRecord(validation)) {
     return { pass: false, type: "validation", message: "validation result was not an object" };
@@ -23353,6 +23979,37 @@ function pointInPolygon2(x, z2, polygon) {
 }
 function polygonsOverlap(a, b) {
   return a.some((point) => pointInPolygon2(point[0], point[1], b)) || b.some((point) => pointInPolygon2(point[0], point[1], a));
+}
+function itemBboxForHarness(position, dimensions, rotationDeg) {
+  const rot = (rotationDeg % 360 + 360) % 360;
+  const rotated = rot === 90 || rot === 270;
+  const width = rotated ? dimensions[2] : dimensions[0];
+  const depth = rotated ? dimensions[0] : dimensions[2];
+  return {
+    minX: position[0] - width / 2,
+    minZ: position[2] - depth / 2,
+    maxX: position[0] + width / 2,
+    maxZ: position[2] + depth / 2
+  };
+}
+function expandBboxForHarness(bbox, amount) {
+  return {
+    minX: bbox.minX - amount,
+    minZ: bbox.minZ - amount,
+    maxX: bbox.maxX + amount,
+    maxZ: bbox.maxZ + amount
+  };
+}
+function bboxesOverlapForHarness(a, b) {
+  return a.maxX > b.minX && a.minX < b.maxX && a.maxZ > b.minZ && a.minZ < b.maxZ;
+}
+function bboxCornersInsidePolygonForHarness(bbox, polygon) {
+  return [
+    [bbox.minX, bbox.minZ],
+    [bbox.maxX, bbox.minZ],
+    [bbox.maxX, bbox.maxZ],
+    [bbox.minX, bbox.maxZ]
+  ].every(([x, z2]) => pointInPolygon2(x, z2, polygon));
 }
 function collectDoorInfos(walls, nodes) {
   const doors = [];

@@ -1052,7 +1052,6 @@ function getSceneInfo(): string {
           [room.bounds.minX, room.bounds.maxZ],
         ],
         bounds: room.bounds,
-        slabId: room.slabId,
       }).slice(0, 8),
       doorCount: room.doorCount,
       windowCount: room.windowCount,
@@ -1849,7 +1848,7 @@ function solveFurnitureLayout(args: Record<string, unknown>): FurnitureSolveResu
   }
 
   return {
-    success: placements.length > 0 && rejections.filter((r) => !r.reasons.some((reason) => reason.startsWith('substituted_with_'))).length === 0,
+    success: placements.length > 0,
     roomType,
     slabId: room.slabId,
     roomBounds: room.bounds,
@@ -1888,7 +1887,7 @@ function placeFurnitureSolved(args: Record<string, unknown>): string {
 
   return JSON.stringify({
     ...solve,
-    success: solve.rejections.filter((r) => !r.reasons.some((reason) => reason.startsWith('substituted_with_'))).length === 0,
+    success: created.length > 0,
     created,
     createdNodeIds: compactIds(created.map((result) => isRecordLike(result) ? result.itemId : undefined)),
     createdByType: { item: compactIds(created.map((result) => isRecordLike(result) ? result.itemId : undefined)) },

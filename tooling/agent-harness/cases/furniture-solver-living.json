@@ -1,0 +1,41 @@
+{
+  "name": "furniture-solver-living",
+  "description": "Solved living room layout should place sofa, TV stand, and coffee table without collisions.",
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": { "origin": [0, 0], "width": 6, "depth": 5, "addDoor": true, "addWindows": true }
+    },
+    {
+      "tool": "suggest_furniture_layout",
+      "args": {
+        "roomType": "living",
+        "items": ["tv-stand", "sofa", "coffee-table"],
+        "roomOrigin": [0, 0],
+        "roomWidth": 6,
+        "roomDepth": 5
+      }
+    },
+    {
+      "tool": "place_furniture_solved",
+      "args": {
+        "roomType": "living",
+        "items": ["tv-stand", "sofa", "coffee-table"],
+        "roomOrigin": [0, 0],
+        "roomWidth": 6,
+        "roomDepth": 5
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 1 },
+    { "type": "toolResult.success", "step": 2 },
+    { "type": "toolResult.field", "step": 1, "path": "placements.0.score", "expected": { "notNull": true } },
+    { "type": "toolResult.includesSuggestions", "step": 1, "tools": ["place_furniture_solved", "validate_scene"] },
+    { "type": "toolResult.field", "step": 2, "path": "rejections", "expected": { "notNull": true } },
+    { "type": "node.count", "nodeType": "item", "min": 1 },
+    { "type": "geometry.furnitureInsideSlabs" },
+    { "type": "geometry.noFurnitureOverlap" },
+    { "type": "validation", "blocking": false, "mustExcludeRuleIds": ["furniture.door_clearance", "furniture.collision", "furniture.use_clearance"] }
+  ]
+}

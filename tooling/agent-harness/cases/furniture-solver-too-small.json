@@ -1,0 +1,25 @@
+{
+  "name": "furniture-solver-too-small",
+  "description": "An infeasible room should return structured rejection reasons and not create invalid furniture.",
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": { "origin": [0, 0], "width": 1.4, "depth": 1.4, "addDoor": true, "addWindows": false }
+    },
+    {
+      "tool": "place_furniture_solved",
+      "args": {
+        "roomType": "bedroom",
+        "items": ["double-bed"],
+        "roomOrigin": [0, 0],
+        "roomWidth": 1.4,
+        "roomDepth": 1.4
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 1, "expected": false },
+    { "type": "toolResult.field", "step": 1, "path": "rejections.0.reasons", "expected": { "notNull": true } },
+    { "type": "node.count", "nodeType": "item", "exact": 0 }
+  ]
+}

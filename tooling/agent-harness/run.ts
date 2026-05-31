@@ -238,6 +238,10 @@ function evaluateAssertion(
       return assertNoSlabOverlap()
     case 'geometry.openingsFitWall':
       return assertOpeningsFitWall()
+    case 'geometry.furnitureInsideSlabs':
+      return assertFurnitureInsideSlabs()
+    case 'geometry.noFurnitureOverlap':
+      return assertNoFurnitureOverlap(assertion.clearance ?? 0)
     case 'validation.repairHints':
       return assertValidationRepairHints(assertion, validation)
     case 'validation':
@@ -508,6 +512,51 @@ function assertOpeningsFitWall(): AssertionResult {
   }
 }
 
+function assertFurnitureInsideSlabs(): AssertionResult {
+  const nodes = useScene.getState().nodes
+  const slabs = nodesByType(nodes, 'slab') as Array<AnyNode & { polygon?: [number, number][] }>
+  const items = nodesByType(nodes, 'item') as Array<AnyNode & { position?: [number, number, number]; asset?: { attachTo?: string; dimensions?: [number, number, number] }; rotation?: [number, number, number] }>
+  const violations: string[] = []
+  for (const item of items) {
+    const attachTo = item.asset?.attachTo
+    if (attachTo === 'wall' || attachTo === 'wall-side' || attachTo === 'ceiling') continue
+    if (!item.position || !item.asset?.dimensions) continue
+    const rotationDeg = Math.round(((item.rotation?.[1] ?? 0) * 180) / Math.PI)
+    const bbox = itemBboxForHarness(item.position, item.asset.dimensions, rotationDeg)
+    const inside = slabs.some((slab) => slab.polygon && bboxCornersInsidePolygonForHarness(bbox, slab.polygon))
+    if (!inside) violations.push(item.id)
+  }
+  return {
+    pass: violations.length === 0,
+    type: 'geometry.furnitureInsideSlabs',
+    message: `all furniture bbox corners inside slabs expected, violations: ${violations.length ? violations.join(', ') : 'none'}`,
+  }
+}
+
+function assertNoFurnitureOverlap(clearance: number): AssertionResult {
+  const nodes = useScene.getState().nodes
+  const items = nodesByType(nodes, 'item') as Array<AnyNode & { position?: [number, number, number]; asset?: { attachTo?: string; dimensions?: [number, number, number] }; rotation?: [number, number, number] }>
+  const floorItems = items.filter((item) => {
+    const attachTo = item.asset?.attachTo
+    return attachTo !== 'wall' && attachTo !== 'wall-side' && attachTo !== 'ceiling' && item.position && item.asset?.dimensions
+  })
+  const violations: string[] = []
+  for (let i = 0; i < floorItems.length; i++) {
+    for (let j = i + 1; j < floorItems.length; j++) {
+      const a = floorItems[i]!
+      const b = floorItems[j]!
+      const aBox = expandBboxForHarness(itemBboxForHarness(a.position!, a.asset!.dimensions!, Math.round(((a.rotation?.[1] ?? 0) * 180) / Math.PI)), clearance)
+      const bBox = itemBboxForHarness(b.position!, b.asset!.dimensions!, Math.round(((b.rotation?.[1] ?? 0) * 180) / Math.PI))
+      if (bboxesOverlapForHarness(aBox, bBox)) violations.push(`${a.id}<->${b.id}`)
+    }
+  }
+  return {
+    pass: violations.length === 0,
+    type: 'geometry.noFurnitureOverlap',
+    message: `no furniture overlap expected, violations: ${violations.length ? violations.join(', ') : 'none'}`,
+  }
+}
+
 function assertValidation(
   assertion: Extract<HarnessAssertion, { type: 'validation' }>,
   validation: unknown,
@@ -696,6 +745,54 @@ function pointInPolygon(x: number, z: number, polygon: [number, number][]): bool
 function polygonsOverlap(a: [number, number][], b: [number, number][]): boolean {
   return a.some((point) => pointInPolygon(point[0], point[1], b)) ||
     b.some((point) => pointInPolygon(point[0], point[1], a))
+}
+
+function itemBboxForHarness(
+  position: [number, number, number],
+  dimensions: [number, number, number],
+  rotationDeg: number,
+): { minX: number; minZ: number; maxX: number; maxZ: number } {
+  const rot = ((rotationDeg % 360) + 360) % 360
+  const rotated = rot === 90 || rot === 270
+  const width = rotated ? dimensions[2] : dimensions[0]
+  const depth = rotated ? dimensions[0] : dimensions[2]
+  return {
+    minX: position[0] - width / 2,
+    minZ: position[2] - depth / 2,
+    maxX: position[0] + width / 2,
+    maxZ: position[2] + depth / 2,
+  }
+}
+
+function expandBboxForHarness(
+  bbox: { minX: number; minZ: number; maxX: number; maxZ: number },
+  amount: number,
+): { minX: number; minZ: number; maxX: number; maxZ: number } {
+  return {
+    minX: bbox.minX - amount,
+    minZ: bbox.minZ - amount,
+    maxX: bbox.maxX + amount,
+    maxZ: bbox.maxZ + amount,
+  }
+}
+
+function bboxesOverlapForHarness(
+  a: { minX: number; minZ: number; maxX: number; maxZ: number },
+  b: { minX: number; minZ: number; maxX: number; maxZ: number },
+): boolean {
+  return a.maxX > b.minX && a.minX < b.maxX && a.maxZ > b.minZ && a.minZ < b.maxZ
+}
+
+function bboxCornersInsidePolygonForHarness(
+  bbox: { minX: number; minZ: number; maxX: number; maxZ: number },
+  polygon: [number, number][],
+): boolean {
+  return [
+    [bbox.minX, bbox.minZ],
+    [bbox.maxX, bbox.minZ],
+    [bbox.maxX, bbox.maxZ],
+    [bbox.minX, bbox.maxZ],
+  ].every(([x, z]) => pointInPolygon(x!, z!, polygon))
 }
 
 function collectDoorInfos(

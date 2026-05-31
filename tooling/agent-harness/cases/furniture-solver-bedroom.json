@@ -1,0 +1,30 @@
+{
+  "name": "furniture-solver-bedroom",
+  "description": "Solved bedroom furniture should stay inside the slab, avoid overlaps, and keep door clearance.",
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": { "origin": [0, 0], "width": 4, "depth": 4, "addDoor": true, "addWindows": true }
+    },
+    {
+      "tool": "place_furniture_solved",
+      "args": {
+        "roomType": "bedroom",
+        "items": ["double-bed", "bedside-table", "closet"],
+        "roomOrigin": [0, 0],
+        "roomWidth": 4,
+        "roomDepth": 4
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 1 },
+    { "type": "toolResult.field", "step": 1, "path": "placements", "expected": { "notNull": true } },
+    { "type": "toolResult.field", "step": 1, "path": "rejections", "expected": { "notNull": true } },
+    { "type": "node.count", "nodeType": "item", "min": 1 },
+    { "type": "geometry.furnitureInsideSlabs" },
+    { "type": "geometry.noFurnitureOverlap" },
+    { "type": "geometry.minClearance", "from": "doors", "to": "floorItems", "min": 0.5 },
+    { "type": "validation", "blocking": false, "mustExcludeRuleIds": ["furniture.door_clearance", "furniture.collision", "furniture.out_of_room_bounds"] }
+  ]
+}
