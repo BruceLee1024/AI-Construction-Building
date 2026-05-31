@@ -21,6 +21,7 @@
     { "type": "node.count", "nodeType": "door", "exact": 1 },
     { "type": "node.count", "nodeType": "window", "exact": 3 },
     { "type": "geometry.closedWalls", "tolerance": 0.001 },
-    { "type": "validation", "valid": true, "blocking": false, "warningCount": 0 }
+    { "type": "geometry.openingsFitWall" },
+    { "type": "validation", "valid": true, "blocking": false, "warningCount": 0, "blockingCount": 0, "codeProfile": "residential_default", "mustExcludeRuleIds": ["door.clear_width", "room.daylight_ratio", "opening.overlap"] }
   ]
 }

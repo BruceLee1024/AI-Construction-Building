@@ -1,0 +1,56 @@
+{
+  "name": "agent-staged-deferral",
+  "description": "Agent guardrails defer one-shot macros and post-layout tools while blocking validation remains active.",
+  "steps": [
+    {
+      "tool": "agent.staged_deferral",
+      "args": {
+        "toolName": "create_furnished_apartment",
+        "userContent": "帮我生成一个完整住宅模型，包含多房间和家具"
+      }
+    },
+    {
+      "tool": "agent.staged_deferral",
+      "args": {
+        "toolName": "place_furniture",
+        "userContent": "继续生成住宅",
+        "lastValidation": {
+          "valid": false,
+          "blocking": true,
+          "fixedCount": 0,
+          "warningCount": 1,
+          "issues": [
+            {
+              "severity": "warning",
+              "type": "code",
+              "ruleId": "room.daylight_ratio",
+              "nodeId": "slab_1",
+              "message": "Room daylight is low."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "tool": "agent.staged_deferral",
+      "args": {
+        "toolName": "place_furniture",
+        "userContent": "继续生成住宅",
+        "lastValidation": {
+          "valid": true,
+          "blocking": false,
+          "fixedCount": 0,
+          "warningCount": 0,
+          "issues": []
+        }
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.field", "step": 0, "path": "deferred", "expected": true },
+    { "type": "toolResult.field", "step": 0, "path": "tool", "expected": "create_furnished_apartment" },
+    { "type": "toolResult.field", "step": 1, "path": "deferred", "expected": true },
+    { "type": "toolResult.field", "step": 1, "path": "blockingIssues.0.ruleId", "expected": "room.daylight_ratio" },
+    { "type": "toolResult.field", "step": 2, "path": "", "expected": null }
+  ]
+}

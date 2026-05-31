@@ -34,7 +34,7 @@ const POST_LAYOUT_TOOLS = new Set([
   'create_furnished_apartment',
 ])
 
-interface ValidationSnapshot {
+export interface ValidationSnapshot {
   valid: boolean
   blocking: boolean
   fixedCount: number
@@ -42,6 +42,7 @@ interface ValidationSnapshot {
   issues: Array<{
     severity: string
     type: string
+    ruleId?: string
     message: string
     nodeId: string
   }>
@@ -196,7 +197,7 @@ function buildValidationMessage(snapshot: ValidationSnapshot): string {
   return lines.join('\n')
 }
 
-function stagedDeferralForTool(
+export function stagedDeferralForTool(
   toolName: string,
   userContent: string,
   lastValidation: ValidationSnapshot | null,
@@ -227,6 +228,7 @@ function stagedDeferralForTool(
         .slice(0, 5)
         .map((issue) => ({
           type: issue.type,
+          ruleId: issue.ruleId,
           nodeId: issue.nodeId,
           message: issue.message,
         })),

@@ -1,0 +1,30 @@
+{
+  "name": "negative-door-clearance",
+  "description": "Furniture placed in the door swing/clearance zone must produce furniture.door_clearance.",
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": {
+        "origin": [0, 0],
+        "width": 5,
+        "depth": 4,
+        "addDoor": true,
+        "addWindows": true
+      }
+    },
+    {
+      "tool": "place_furniture",
+      "args": {
+        "type": "dining-chair",
+        "position": [2.5, 0.05, 0.4],
+        "rotation": 0
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 0 },
+    { "type": "toolResult.success", "step": 1 },
+    { "type": "node.count", "nodeType": "item", "exact": 1 },
+    { "type": "validation", "valid": false, "blocking": true, "blockingCount": { "min": 1 }, "ruleSummary": { "furniture.door_clearance": { "min": 1 } }, "mustIncludeRuleIds": ["furniture.door_clearance"] }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "negative-room-no-door",
+  "description": "A usable room without a door/opening must produce room.has_door.",
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": {
+        "origin": [0, 0],
+        "width": 5,
+        "depth": 4,
+        "addDoor": false,
+        "addWindows": true
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 0 },
+    { "type": "node.count", "nodeType": "door", "exact": 0 },
+    { "type": "validation", "valid": false, "blocking": true, "blockingCount": { "min": 1 }, "ruleSummary": { "room.has_door": 1 }, "mustIncludeRuleIds": ["room.has_door"] }
+  ]
+}

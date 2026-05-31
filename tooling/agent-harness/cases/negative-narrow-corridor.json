@@ -1,0 +1,20 @@
+{
+  "name": "negative-narrow-corridor",
+  "description": "A corridor below the residential clear width must produce corridor.min_width.",
+  "steps": [
+    {
+      "tool": "create_hallway",
+      "args": {
+        "from": [0, 0],
+        "to": [0, 5],
+        "width": 0.8,
+        "addSlab": true
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 0 },
+    { "type": "node.count", "nodeType": "slab", "exact": 1 },
+    { "type": "validation", "valid": false, "blocking": true, "blockingCount": { "min": 1 }, "ruleSummary": { "corridor.min_width": 1 }, "mustIncludeRuleIds": ["corridor.min_width"] }
+  ]
+}

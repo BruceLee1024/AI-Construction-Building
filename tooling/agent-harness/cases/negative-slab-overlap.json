@@ -1,0 +1,32 @@
+{
+  "name": "negative-slab-overlap",
+  "description": "Overlapping room slabs must produce geometry.slab_overlap.",
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": {
+        "origin": [0, 0],
+        "width": 5,
+        "depth": 4,
+        "addDoor": true,
+        "addWindows": true
+      }
+    },
+    {
+      "tool": "create_room",
+      "args": {
+        "origin": [3, 0],
+        "width": 5,
+        "depth": 4,
+        "addDoor": true,
+        "addWindows": true
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 0 },
+    { "type": "toolResult.success", "step": 1 },
+    { "type": "node.count", "nodeType": "slab", "exact": 2 },
+    { "type": "validation", "valid": false, "blocking": true, "blockingCount": { "min": 1 }, "ruleSummary": { "geometry.slab_overlap": { "min": 1 } }, "mustIncludeRuleIds": ["geometry.slab_overlap"] }
+  ]
+}

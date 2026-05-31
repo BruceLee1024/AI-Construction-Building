@@ -16748,14 +16748,28 @@ var CATALOG_ITEMS = [
 ];
 
 // packages/editor/src/lib/agent/spatial-validator.ts
-var SNAP_THRESHOLD = 0.05;
-var FURNITURE_MARGIN = 0.1;
-var DOOR_MARGIN = 0.05;
-var MIN_DOOR_CLEAR_WIDTH = 0.8;
-var MIN_CORRIDOR_WIDTH = 1.1;
-var MIN_ROOM_WIDTH = 1.8;
-var MAX_ROOM_ASPECT_RATIO = 3;
-var MIN_DAYLIGHT_RATIO = 0.08;
+var CODE_PROFILES = {
+  residential_default: {
+    name: "residential_default",
+    snapThreshold: 0.05,
+    furnitureMargin: 0.1,
+    openingMargin: 0.05,
+    minDoorClearWidth: 0.8,
+    minCorridorWidth: 1.1,
+    minRoomWidth: 1.8,
+    maxRoomAspectRatio: 3,
+    minDaylightRatio: 0.08,
+    minWindowSillHeight: 0.15,
+    minDoorClearance: 0.5,
+    minUsableArea: 2
+  }
+};
+function resolveCodeProfile(codeProfile) {
+  if (codeProfile && codeProfile in CODE_PROFILES) {
+    return CODE_PROFILES[codeProfile];
+  }
+  return CODE_PROFILES.residential_default;
+}
 function dist2D(a, b) {
   return Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2);
 }
@@ -16795,7 +16809,7 @@ function closestPointOnPolygonEdge(px, pz, polygon) {
   }
   return bestPoint;
 }
-function snapWallEndpoints(walls, issues) {
+function snapWallEndpoints(walls, issues, profile) {
   const { updateNode } = use_scene_default.getState();
   const endpoints = [];
   for (const w of walls) {
@@ -16809,7 +16823,7 @@ function snapWallEndpoints(walls, issues) {
       const b = endpoints[j];
       if (a.wallId === b.wallId) continue;
       const d = dist2D(a.point, b.point);
-      if (d > 1e-3 && d < SNAP_THRESHOLD) {
+      if (d > 1e-3 && d < profile.snapThreshold) {
         const key = `${b.wallId}-${b.which}`;
         if (snapped.has(key)) continue;
         snapped.add(key);
@@ -16819,6 +16833,7 @@ function snapWallEndpoints(walls, issues) {
         issues.push({
           type: "snap",
           severity: "fixed",
+          ruleId: "geometry.wall_endpoint_snap",
           nodeId: b.wallId,
           message: `Wall ${b.which} snapped to nearby endpoint (gap: ${(d * 100).toFixed(1)}cm)`
         });
@@ -16826,7 +16841,7 @@ function snapWallEndpoints(walls, issues) {
     }
   }
 }
-function validateFurnitureBounds(items, slabs, issues) {
+function validateFurnitureBounds(items, slabs, issues, profile) {
   if (slabs.length === 0) return;
   const { updateNode } = use_scene_default.getState();
   for (const item of items) {
@@ -16858,8 +16873,8 @@ function validateFurnitureBounds(items, slabs, issues) {
       const toCenter = [centroid[0] - edgePoint[0], centroid[1] - edgePoint[1]];
       const toCenterLen = Math.sqrt(toCenter[0] ** 2 + toCenter[1] ** 2);
       const nudge = toCenterLen > 0.01 ? [
-        edgePoint[0] + toCenter[0] / toCenterLen * FURNITURE_MARGIN,
-        edgePoint[1] + toCenter[1] / toCenterLen * FURNITURE_MARGIN
+        edgePoint[0] + toCenter[0] / toCenterLen * profile.furnitureMargin,
+        edgePoint[1] + toCenter[1] / toCenterLen * profile.furnitureMargin
       ] : [edgePoint[0], edgePoint[1]];
       updateNode(item.id, {
         position: [nudge[0], item.position[1], nudge[1]]
@@ -16867,13 +16882,14 @@ function validateFurnitureBounds(items, slabs, issues) {
       issues.push({
         type: "bounds",
         severity: "fixed",
+        ruleId: "furniture.inside_slab",
         nodeId: item.id,
         message: `Item "${item.asset.name}" was outside room, nudged inside`
       });
     }
   }
 }
-function validateDoorWindowFit(walls, nodes, issues) {
+function validateDoorWindowFit(walls, nodes, issues, profile) {
   const { updateNode } = use_scene_default.getState();
   for (const wall of walls) {
     const wLen = wallLength(wall);
@@ -16886,12 +16902,13 @@ function validateDoorWindowFit(walls, nodes, issues) {
         const doorWidth = door.width ?? 0.9;
         const halfDoor = doorWidth / 2;
         const localX = door.position[0];
-        const minX = halfDoor + DOOR_MARGIN;
-        const maxX = wLen - halfDoor - DOOR_MARGIN;
+        const minX = halfDoor + profile.openingMargin;
+        const maxX = wLen - halfDoor - profile.openingMargin;
         if (minX > maxX) {
           issues.push({
             type: "bounds",
             severity: "warning",
+            ruleId: "opening.fits_wall",
             nodeId: door.id,
             message: `Door too wide for wall (door: ${doorWidth.toFixed(2)}m, wall: ${wLen.toFixed(2)}m)`
           });
@@ -16905,6 +16922,7 @@ function validateDoorWindowFit(walls, nodes, issues) {
           issues.push({
             type: "bounds",
             severity: "fixed",
+            ruleId: "opening.fits_wall",
             nodeId: door.id,
             message: `Door position clamped to fit within wall (${localX.toFixed(2)} \u2192 ${clampedX.toFixed(2)})`
           });
@@ -16914,12 +16932,13 @@ function validateDoorWindowFit(walls, nodes, issues) {
         const winWidth = win.width ?? 1.5;
         const halfWin = winWidth / 2;
         const localX = win.position[0];
-        const minX = halfWin + DOOR_MARGIN;
-        const maxX = wLen - halfWin - DOOR_MARGIN;
+        const minX = halfWin + profile.openingMargin;
+        const maxX = wLen - halfWin - profile.openingMargin;
         if (minX > maxX) {
           issues.push({
             type: "bounds",
             severity: "warning",
+            ruleId: "opening.fits_wall",
             nodeId: win.id,
             message: `Window too wide for wall (window: ${winWidth.toFixed(2)}m, wall: ${wLen.toFixed(2)}m)`
           });
@@ -16933,6 +16952,7 @@ function validateDoorWindowFit(walls, nodes, issues) {
           issues.push({
             type: "bounds",
             severity: "fixed",
+            ruleId: "opening.fits_wall",
             nodeId: win.id,
             message: `Window position clamped to fit within wall (${localX.toFixed(2)} \u2192 ${clampedX.toFixed(2)})`
           });
@@ -16941,7 +16961,7 @@ function validateDoorWindowFit(walls, nodes, issues) {
     }
   }
 }
-function detectWallGaps(walls, issues) {
+function detectWallGaps(walls, issues, profile) {
   for (const w of walls) {
     for (const other of walls) {
       if (w.id === other.id) continue;
@@ -16956,10 +16976,11 @@ function detectWallGaps(walls, issues) {
         const projX = other.start[0] + t * dx;
         const projZ = other.start[1] + t * dz;
         const d = Math.sqrt((pt[0] - projX) ** 2 + (pt[1] - projZ) ** 2);
-        if (d > 1e-3 && d < SNAP_THRESHOLD * 2) {
+        if (d > 1e-3 && d < profile.snapThreshold * 2) {
           issues.push({
             type: "gap",
             severity: "warning",
+            ruleId: "geometry.wall_gap",
             nodeId: w.id,
             message: `Wall ${which} is ${(d * 100).toFixed(1)}cm from wall body (possible T-junction gap)`
           });
@@ -17112,6 +17133,7 @@ function detectDoorWindowOverlap(walls, nodes, issues) {
           issues.push({
             type: "overlap",
             severity: "warning",
+            ruleId: "opening.overlap",
             nodeId: a.id,
             message: `Opening overlaps with another opening on the same wall`
           });
@@ -17135,6 +17157,7 @@ function validateFurnitureCollision(items, issues) {
         issues.push({
           type: "overlap",
           severity: "warning",
+          ruleId: "furniture.collision",
           nodeId: a.id,
           message: `Furniture "${a.asset.name}" might be colliding with "${b.asset.name}"`
         });
@@ -17159,6 +17182,7 @@ function validatePhysicsAndStructure(items, slabs, walls, nodes, issues) {
       issues.push({
         type: "bounds",
         severity: "fixed",
+        ruleId: "furniture.floor_level",
         nodeId: item.id,
         message: `Furniture "${item.asset.name}" was floating, snapped to floor level (${highestElevation.toFixed(2)}m)`
       });
@@ -17176,6 +17200,7 @@ function validatePhysicsAndStructure(items, slabs, walls, nodes, issues) {
           issues.push({
             type: "bounds",
             severity: "fixed",
+            ruleId: "opening.height_fits_wall",
             nodeId: door.id,
             message: `Door height exceeded wall height, scaled down`
           });
@@ -17187,6 +17212,7 @@ function validatePhysicsAndStructure(items, slabs, walls, nodes, issues) {
           issues.push({
             type: "bounds",
             severity: "warning",
+            ruleId: "opening.height_fits_wall",
             nodeId: win.id,
             message: `Window top edge (${topEdge.toFixed(2)}m) exceeds wall height (${wallHeight.toFixed(2)}m)`
           });
@@ -17201,13 +17227,14 @@ function validatePhysicsAndStructure(items, slabs, walls, nodes, issues) {
       issues.push({
         type: "info",
         severity: "info",
+        ruleId: "structure.large_span",
         nodeId: slab.id,
         message: `Large slab detected (${area.toFixed(1)} sqm). Ensure adequate structural support.`
       });
     }
   }
 }
-function validateArchitectureDesign(items, slabs, walls, nodes, issues) {
+function validateArchitectureDesign(items, slabs, walls, nodes, issues, profile) {
   const windowsBySlab = collectWindowsBySlab(slabs, walls, nodes);
   for (const slab of slabs) {
     if (slab.polygon.length < 3) continue;
@@ -17224,29 +17251,33 @@ function validateArchitectureDesign(items, slabs, walls, nodes, issues) {
       issues.push({
         type: "code",
         severity: "warning",
+        ruleId: "room.daylight_ratio",
         nodeId: slab.id,
         message: `Room/slab ${slab.id} has no associated exterior window. Add daylight/ventilation before furnishing.`
       });
-    } else if (area >= 8 && daylightRatio < MIN_DAYLIGHT_RATIO) {
+    } else if (area >= 8 && daylightRatio < profile.minDaylightRatio) {
       issues.push({
         type: "code",
         severity: "warning",
+        ruleId: "room.daylight_ratio",
         nodeId: slab.id,
         message: `Room/slab ${slab.id} daylight ratio is low (${(daylightRatio * 100).toFixed(1)}%). Add or enlarge windows.`
       });
     }
-    if (!isLikelyCorridor && area >= 4 && shortSide < MIN_ROOM_WIDTH) {
+    if (!isLikelyCorridor && area >= 4 && shortSide < profile.minRoomWidth) {
       issues.push({
         type: "code",
         severity: "warning",
+        ruleId: "room.min_width",
         nodeId: slab.id,
-        message: `Usable room is too narrow (${shortSide.toFixed(2)}m). Keep normal rooms at least ${MIN_ROOM_WIDTH.toFixed(1)}m wide; use hallway semantics for narrower spaces.`
+        message: `Usable room is too narrow (${shortSide.toFixed(2)}m). Keep normal rooms at least ${profile.minRoomWidth.toFixed(1)}m wide; use hallway semantics for narrower spaces.`
       });
     }
-    if (area >= 6 && aspectRatio > MAX_ROOM_ASPECT_RATIO && shortSide < MIN_CORRIDOR_WIDTH) {
+    if (area >= 6 && aspectRatio > profile.maxRoomAspectRatio && shortSide < profile.minCorridorWidth) {
       issues.push({
         type: "code",
         severity: "warning",
+        ruleId: "room.aspect_ratio",
         nodeId: slab.id,
         message: `Room proportion is extreme (${aspectRatio.toFixed(1)}:1). Rebalance dimensions or model it as a corridor.`
       });
@@ -17255,13 +17286,14 @@ function validateArchitectureDesign(items, slabs, walls, nodes, issues) {
       issues.push({
         type: "code",
         severity: "warning",
+        ruleId: "room.exterior_edge",
         nodeId: slab.id,
         message: `Enclosed room appears to have no exterior edge for natural light/ventilation.`
       });
     }
   }
 }
-function checkCirculationAndSafety(levelId, walls, slabs, items, nodes, issues) {
+function checkCirculationAndSafety(levelId, walls, slabs, items, nodes, issues, profile) {
   const levelNode = nodes[levelId];
   const isGroundLevel = levelNode && levelNode.type === "level" && levelNode.level === 0;
   const doorInfos = [];
@@ -17297,14 +17329,15 @@ function checkCirculationAndSafety(levelId, walls, slabs, items, nodes, issues) 
     for (const item of floorItems) {
       const dist = dist2D([door.worldX, door.worldZ], [item.position[0], item.position[2]]);
       const dim = getScaledDimensions(item);
-      const itemRadius = Math.max(dim[0], dim[2]) / 2;
-      const requiredClearance = door.width / 2 + 0.5 + itemRadius;
+      const itemRadius2 = Math.max(dim[0], dim[2]) / 2;
+      const requiredClearance = door.width / 2 + profile.minDoorClearance + itemRadius2;
       if (dist < requiredClearance) {
         issues.push({
           type: "overlap",
           severity: "warning",
+          ruleId: "furniture.door_clearance",
           nodeId: item.id,
-          message: `Furniture "${item.asset.name}" is blocking the door (clearance < 0.5m).`
+          message: `Furniture "${item.asset.name}" is blocking the door (clearance < ${profile.minDoorClearance.toFixed(1)}m).`
         });
       }
     }
@@ -17325,6 +17358,7 @@ function checkCirculationAndSafety(levelId, walls, slabs, items, nodes, issues) 
         issues.push({
           type: "code",
           severity: "warning",
+          ruleId: "door.upper_floor_fall_hazard",
           nodeId: door.id,
           message: `Exterior door detected on an upper floor without a balcony/slab outside. Fall hazard!`
         });
@@ -17332,7 +17366,7 @@ function checkCirculationAndSafety(levelId, walls, slabs, items, nodes, issues) 
     }
   }
 }
-function validateBuildingCodeBasics(walls, slabs, nodes, issues) {
+function validateBuildingCodeBasics(walls, slabs, nodes, issues, profile) {
   const doorsBySlab = collectDoorsBySlab(slabs, walls, nodes);
   for (const wall of walls) {
     const wallLen = wallLength(wall);
@@ -17342,18 +17376,20 @@ function validateBuildingCodeBasics(walls, slabs, nodes, issues) {
       if (child.type === "door") {
         const door = child;
         const doorWidth = door.width ?? 0.9;
-        if (doorWidth < MIN_DOOR_CLEAR_WIDTH) {
+        if (doorWidth < profile.minDoorClearWidth) {
           issues.push({
             type: "code",
             severity: "warning",
+            ruleId: "door.clear_width",
             nodeId: door.id,
-            message: `Door width ${doorWidth.toFixed(2)}m is below the ${MIN_DOOR_CLEAR_WIDTH.toFixed(2)}m minimum clear-width target.`
+            message: `Door width ${doorWidth.toFixed(2)}m is below the ${profile.minDoorClearWidth.toFixed(2)}m minimum clear-width target.`
           });
         }
         if (wallLen > 0 && doorWidth > wallLen * 0.75) {
           issues.push({
             type: "code",
             severity: "warning",
+            ruleId: "door.wall_ratio",
             nodeId: door.id,
             message: `Door consumes too much of a short wall (${doorWidth.toFixed(2)}m door on ${wallLen.toFixed(2)}m wall).`
           });
@@ -17364,10 +17400,11 @@ function validateBuildingCodeBasics(walls, slabs, nodes, issues) {
         const sillCenter = win.position[1];
         const winHeight = win.height ?? 1.5;
         const sillBottom = sillCenter - winHeight / 2;
-        if (sillBottom < 0.75) {
+        if (sillBottom < profile.minWindowSillHeight) {
           issues.push({
             type: "code",
             severity: "warning",
+            ruleId: "window.sill_height",
             nodeId: win.id,
             message: `Window sill is low (${sillBottom.toFixed(2)}m). Check fall protection or raise sill height.`
           });
@@ -17382,26 +17419,29 @@ function validateBuildingCodeBasics(walls, slabs, nodes, issues) {
     const longSide = Math.max(bounds.width, bounds.depth);
     const area = polygonArea(slab.polygon);
     const isLikelyCorridor = longSide >= 3 && shortSide <= 1.6;
-    if (isLikelyCorridor && shortSide < MIN_CORRIDOR_WIDTH) {
+    if (isLikelyCorridor && shortSide < profile.minCorridorWidth) {
       issues.push({
         type: "code",
         severity: "warning",
+        ruleId: "corridor.min_width",
         nodeId: slab.id,
-        message: `Corridor clear width is about ${shortSide.toFixed(2)}m; keep circulation at least ${MIN_CORRIDOR_WIDTH.toFixed(2)}m wide.`
+        message: `Corridor clear width is about ${shortSide.toFixed(2)}m; keep circulation at least ${profile.minCorridorWidth.toFixed(2)}m wide.`
       });
     }
-    if (area > 0 && area < 2) {
+    if (area > 0 && area < profile.minUsableArea) {
       issues.push({
         type: "code",
         severity: "warning",
+        ruleId: "room.min_area",
         nodeId: slab.id,
         message: `Room/slab area is only ${area.toFixed(1)} sqm, which is too small for a usable enclosed space.`
       });
     }
-    if (area >= 4 && (doorsBySlab.get(slab.id)?.length ?? 0) === 0) {
+    if (!isLikelyCorridor && area >= 4 && (doorsBySlab.get(slab.id)?.length ?? 0) === 0) {
       issues.push({
         type: "code",
         severity: "warning",
+        ruleId: "room.has_door",
         nodeId: slab.id,
         message: `Room/slab ${slab.id} has no associated door/opening. Add a doorway for circulation.`
       });
@@ -17433,6 +17473,7 @@ function detectSlabOverlaps(slabs, issues) {
         issues.push({
           type: "overlap",
           severity: "warning",
+          ruleId: "geometry.slab_overlap",
           nodeId: a.id,
           message: `Room/Slab footprint overlaps with another room. Ensure they are adjacent, not intersecting.`
         });
@@ -17440,9 +17481,10 @@ function detectSlabOverlaps(slabs, issues) {
     }
   }
 }
-function validateAndCorrectScene(levelId) {
+function validateAndCorrectScene(levelId, codeProfile) {
   const { nodes } = use_scene_default.getState();
   const issues = [];
+  const profile = resolveCodeProfile(codeProfile);
   const walls = [];
   const slabs = [];
   const items = [];
@@ -17458,21 +17500,21 @@ function validateAndCorrectScene(levelId) {
     else if (node.type === "slab") slabs.push(node);
     else if (node.type === "item") items.push(node);
   }
-  snapWallEndpoints(walls, issues);
-  validateDoorWindowFit(walls, nodes, issues);
-  validateFurnitureBounds(items, slabs, issues);
-  detectWallGaps(walls, issues);
+  snapWallEndpoints(walls, issues, profile);
+  validateDoorWindowFit(walls, nodes, issues, profile);
+  validateFurnitureBounds(items, slabs, issues, profile);
+  detectWallGaps(walls, issues, profile);
   detectDoorWindowOverlap(walls, nodes, issues);
   validateFurnitureCollision(items, issues);
   validatePhysicsAndStructure(items, slabs, walls, nodes, issues);
-  validateArchitectureDesign(items, slabs, walls, nodes, issues);
-  checkCirculationAndSafety(levelId, walls, slabs, items, nodes, issues);
+  validateArchitectureDesign(items, slabs, walls, nodes, issues, profile);
+  checkCirculationAndSafety(levelId, walls, slabs, items, nodes, issues, profile);
   detectSlabOverlaps(slabs, issues);
-  validateBuildingCodeBasics(walls, slabs, nodes, issues);
+  validateBuildingCodeBasics(walls, slabs, nodes, issues, profile);
   const fixedCount = issues.filter((i) => i.severity === "fixed").length;
   const warningCount = issues.filter((i) => i.severity === "warning").length;
   const blockingCount = issues.filter((i) => i.severity === "warning" && (i.type === "code" || i.type === "bounds" || i.type === "gap" || i.type === "overlap")).length;
-  return { issues, fixedCount, warningCount, blockingCount };
+  return { issues, fixedCount, warningCount, blockingCount, codeProfile: profile.name };
 }
 function formatValidationReport(result) {
   const blocking = result.blockingCount > 0;
@@ -17480,6 +17522,11 @@ function formatValidationReport(result) {
     acc[issue2.type] = (acc[issue2.type] ?? 0) + 1;
     return acc;
   }, {});
+  const ruleSummary = result.issues.reduce((acc, issue2) => {
+    acc[issue2.ruleId] = (acc[issue2.ruleId] ?? 0) + 1;
+    return acc;
+  }, {});
+  const blockingRuleIds = Array.from(new Set(result.issues.filter((i) => i.severity === "warning" && (i.type === "code" || i.type === "bounds" || i.type === "gap" || i.type === "overlap")).map((i) => i.ruleId)));
   if (result.issues.length === 0) {
     return JSON.stringify({
       valid: true,
@@ -17487,7 +17534,10 @@ function formatValidationReport(result) {
       fixedCount: 0,
       warningCount: 0,
       blockingCount: 0,
+      codeProfile: result.codeProfile,
       issueSummary: {},
+      ruleSummary: {},
+      blockingRuleIds: [],
       issues: [],
       message: "No spatial or building-code issues found",
       nextAction: "Continue to the next staged generation phase."
@@ -17499,10 +17549,14 @@ function formatValidationReport(result) {
     fixedCount: result.fixedCount,
     warningCount: result.warningCount,
     blockingCount: result.blockingCount,
+    codeProfile: result.codeProfile,
     issueSummary,
+    ruleSummary,
+    blockingRuleIds,
     issues: result.issues.map((i) => ({
       type: i.type,
       severity: i.severity,
+      ruleId: i.ruleId,
       nodeId: i.nodeId,
       message: i.message
     })),
@@ -17615,7 +17669,7 @@ function executeToolCall(name, args) {
       case "place_ceiling_item":
         return placeCeilingItem(args);
       case "validate_scene":
-        return validateScene();
+        return validateScene(args);
       case "auto_align_windows":
         return autoAlignWindows(args);
       case "build_staircase":
@@ -19619,9 +19673,9 @@ function placeCeilingItem(args) {
     position
   });
 }
-function validateScene() {
+function validateScene(args = {}) {
   const levelId = getLevelId();
-  const result = validateAndCorrectScene(levelId);
+  const result = validateAndCorrectScene(levelId, args.codeProfile);
   return formatValidationReport(result);
 }
 function autoAlignWindows(args) {
@@ -19726,6 +19780,2312 @@ function buildStaircase(args) {
   });
 }
 
+// node_modules/.bun/zustand@5.0.11+193a2bbed534bb3e/node_modules/zustand/esm/vanilla.mjs
+var createStoreImpl2 = (createState) => {
+  let state;
+  const listeners = /* @__PURE__ */ new Set();
+  const setState = (partial2, replace) => {
+    const nextState = typeof partial2 === "function" ? partial2(state) : partial2;
+    if (!Object.is(nextState, state)) {
+      const previousState = state;
+      state = (replace != null ? replace : typeof nextState !== "object" || nextState === null) ? nextState : Object.assign({}, state, nextState);
+      listeners.forEach((listener) => listener(state, previousState));
+    }
+  };
+  const getState = () => state;
+  const getInitialState = () => initialState;
+  const subscribe = (listener) => {
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  };
+  const api = { setState, getState, getInitialState, subscribe };
+  const initialState = state = createState(setState, getState, api);
+  return api;
+};
+var createStore2 = ((createState) => createState ? createStoreImpl2(createState) : createStoreImpl2);
+
+// node_modules/.bun/zustand@5.0.11+193a2bbed534bb3e/node_modules/zustand/esm/react.mjs
+import React2 from "react";
+var identity2 = (arg) => arg;
+function useStore2(api, selector = identity2) {
+  const slice = React2.useSyncExternalStore(
+    api.subscribe,
+    React2.useCallback(() => selector(api.getState()), [api, selector]),
+    React2.useCallback(() => selector(api.getInitialState()), [api, selector])
+  );
+  React2.useDebugValue(slice);
+  return slice;
+}
+var createImpl2 = (createState) => {
+  const api = createStore2(createState);
+  const useBoundStore = (selector) => useStore2(api, selector);
+  Object.assign(useBoundStore, api);
+  return useBoundStore;
+};
+var create2 = ((createState) => createState ? createImpl2(createState) : createImpl2);
+
+// packages/editor/src/lib/agent/system-prompt.ts
+var SYSTEM_PROMPT = `You are an AI building architect assistant embedded in Pascal Editor, a 3D building modeling tool. You think spatially, understand architectural concepts, and are precise with coordinates and dimensions.
+
+## Core Principles
+
+1. **Staged generation**: Generate architecture in phases, not as one giant action. For any multi-room, furnished, multi-story, or code-sensitive request, proceed in this order: site/brief \u2192 footprint and room layout \u2192 validate \u2192 openings/circulation \u2192 validate \u2192 furniture/details \u2192 validate \u2192 final summary.
+2. **Single-level default**: All building operations happen on the **current active level** (Level 0). Do NOT create, switch, or duplicate levels unless the user **explicitly** mentions multi-story, "\u52A0\u4E00\u5C42", "\u591A\u5C42", "second floor", etc.
+3. **Do exactly what is asked**: If the user says "\u521B\u5EFA\u4E00\u4E2A\u623F\u95F4", just create a room. Do NOT also add levels, furniture, or other extras unless asked.
+4. **Use high-level tools carefully**: Prefer high-level tools for simple rooms. For complex buildings, use smaller staged tool calls so validation feedback can correct the model before the next phase.
+5. **Code-aware by default**: Treat building-code and safety warnings as blocking issues. Fix them before adding decoration, furniture, roofs, or finalizing.
+
+## Coordinate System & Units
+
+All values are in **meters**. The world uses a Y-up right-handed coordinate system:
+
+| Axis | Direction | Used for |
+|------|-----------|----------|
+| X | left \u2194 right (east/west) | width |
+| Y | bottom \u2194 top | height |
+| Z | front \u2194 back (north/south) | depth |
+
+- **Walls**: defined by start [x, z] and end [x, z] on the horizontal XZ plane
+- **Polygons** (slabs, ceilings, zones): arrays of [x, z] vertices, counter-clockwise winding
+- **Doors/Windows**: positioned using \`position_t\` (0 = wall start, 0.5 = center, 1 = wall end)
+
+### Wall-Local Coordinate System
+Each wall has a local coordinate frame:
+- **Origin** at the wall's \`start\` point
+- **X-axis** runs along the wall toward the \`end\` point (length direction)
+- **Y-axis** is vertical (height)
+- **Z-axis** is perpendicular to the wall face (thickness direction)
+
+When placing a door/window with \`position_t = 0.5\`, it is placed at the **center** of the wall.
+
+## Scene Hierarchy
+
+\`\`\`
+Site \u2192 Building \u2192 Level \u2192 Walls, Slabs, Ceilings, Roofs, Zones
+                           \u21B3 Wall \u2192 Doors, Windows (children)
+                           \u21B3 Roof \u2192 RoofSegments (children)
+\`\`\`
+
+- Doors and Windows are **always children of a Wall** \u2014 they move with the wall
+- Deleting a wall also deletes its doors and windows
+
+## Tool Selection Strategy
+
+Choose the simplest tool for the current phase, then validate before continuing. A single rectangular room can be one tool call. A house, apartment, office, furnished model, or multi-story building must be generated in staged passes.
+
+### Staged Workflow
+
+For complex requests:
+
+1. **Plan first in text**: Briefly state the layout strategy, assumed dimensions, circulation concept, and code targets.
+2. **Create only the shell/layout phase**: Build footprint, major rooms, corridors, slabs/zones, and essential walls.
+3. **Read validation feedback**: If any \`[Spatial Auto-Validation Report]\` contains warnings, fix those before continuing.
+4. **Add openings and circulation**: Doors, windows, staircases, balconies, and hallway connections.
+5. **Validate again**.
+6. **Add furniture/details** only after layout and building-code warnings are resolved.
+7. **Final response**: Summarize what was created and mention any remaining warnings.
+
+Never call multiple scene-modifying tools in the same assistant turn for complex generation. If the tool result says a modification was deferred, do not repeat the same deferred tool immediately; switch to the requested nextAction and use smaller phase tools.
+
+### Runtime Guardrails
+
+The executor may block or defer a tool call:
+
+- \`deferred: true\` with one-shot macro tools means the request is too complex for a single macro. Use smaller layout tools first.
+- \`blockingIssues\` means validation found problems. Fix those exact node IDs/messages before adding furniture, roof, decoration, or final summary.
+- A validation report with \`blocking: false\` means it is safe to continue to the next staged phase.
+- A validation report with \`blocking: true\` means only repair/modification tools should be used next.
+
+### Primary Tools (use these first)
+
+| User Intent | Recommended Tool |
+|---|---|
+| Single rectangular room | \`create_room\` |
+| Multi-room apartment / house | \`create_apartment\` |
+| L-shaped room | \`create_l_shaped_room\` |
+| Non-rectangular room (triangle, hexagon, etc.) | \`create_polygon_room\` |
+| Custom walls (not a complete room) | \`create_walls\` |
+| Add door to existing wall (know wall ID) | \`add_door_to_wall\` |
+| Add window to existing wall (know wall ID) | \`add_window_to_wall\` |
+| Auto-align windows on multiple walls | \`auto_align_windows\` |
+| Build staircase between levels | \`build_staircase\` |
+| Add door during room creation | Set \`addDoor: true\` in create_room |
+| Add ceiling to room | Set \`addCeiling: true\` in create_room |
+| Place furniture by coordinates | \`place_furniture\` |
+| Place furniture by semantic anchor (north-wall, center\u2026) | \`place_in_room\` \u2B50 preferred |
+| Place furniture flush against a specific wall | \`place_against_wall\` \u2B50 preferred |
+| Auto-furnish entire room | \`furnish_room\` |
+| Create corridor / hallway | \`create_hallway\` |
+| Complete building (walls+slab+ceiling+roof) | \`create_building_shell\` |
+| Apartment with auto-furniture | \`create_furnished_apartment\` |
+| Duplicate room adjacent | \`mirror_room\` |
+| Check available furniture | \`list_furniture\` |
+| Modify existing elements | \`modify_node\` or \`batch_modify_nodes\` |
+| Relocate elements | \`move_nodes\` |
+| Inspect current scene | \`get_scene_info\` |
+| Remove element | \`delete_node\` |
+| Clear everything | \`delete_all_on_level\` |
+| Undo/Redo | \`undo\` / \`redo\` |
+| Hang item on wall (picture, mirror, shelf\u2026) | \`place_wall_item\` |
+| Mount item on ceiling (lamp, light\u2026) | \`place_ceiling_item\` |
+
+### Level Tools (ONLY when user explicitly asks for multi-story)
+
+These tools manage building floors. **Never** use them for single-floor requests.
+
+| User Intent | Tool |
+|---|---|
+| "\u52A0\u4E00\u5C42" / "add a floor" | \`add_level\` |
+| "\u5207\u6362\u5230X\u5C42" / "go to level X" | \`switch_level\` |
+| "\u5220\u9664\u697C\u5C42" / "delete floor" | \`delete_level\` |
+| "\u91CD\u547D\u540D\u697C\u5C42" | \`rename_level\` |
+| "\u590D\u5236\u697C\u5C42" / "duplicate floor" | \`duplicate_level\` |
+| "\u67E5\u770B\u6240\u6709\u697C\u5C42" / "show floors" | \`list_levels\` |
+
+## Default Dimensions
+
+| Element | Default |
+|---|---|
+| Wall height | 2.8 m |
+| Wall thickness | 0.15 m |
+| Door | 0.9 m wide \xD7 2.1 m tall |
+| Window | 1.5 m wide \xD7 1.5 m tall, sill 0.9 m |
+| Ceiling height | 2.5 m |
+
+### Typical Room Sizes (reference)
+
+| Room | Width \xD7 Depth |
+|---|---|
+| Living room | 5 \xD7 4 m |
+| Bedroom | 3.5 \xD7 4 m |
+| Kitchen | 3 \xD7 3 m |
+| Bathroom | 2 \xD7 2.5 m |
+| Study | 3 \xD7 3 m |
+| Hallway | 1.5 \xD7 4 m |
+| Balcony | 3 \xD7 1.5 m |
+
+## Spatial Context & Feedback
+
+### Reading Tool Returns
+Every room/furniture tool now returns **spatial context** \u2014 use it instead of mental math:
+
+- \`create_room\` returns \`spatialContext\`:
+  - \`roomBounds\`: outer corners {minX, minZ, maxX, maxZ}
+  - \`interiorBounds\`: safe furniture zone (wall face + 5cm gap)
+  - \`wallsByFace\`: {south, east, north, west} with wall IDs, endpoints, length
+  - \`slabPolygon\`: actual slab vertices
+
+- \`place_furniture\` / \`place_in_room\` / \`place_against_wall\` return:
+  - \`bbox\`: actual world-space bounding box {minX, minZ, maxX, maxZ}
+  - \`insideSlabId\`: which room slab contains the item (null = outside all rooms!)
+  - \`warning\`: shown if item is NOT inside any room
+
+- \`create_furnished_apartment\` returns:
+  - \`overallBounds\`: total apartment footprint
+  - \`layoutSummary\`: per-room name, origin, size, furniture count
+
+**Always check \`insideSlabId\` and \`warning\` in placement results.** If an item is outside a room, fix it immediately.
+
+### Semantic Placement (preferred over raw coordinates)
+
+When placing individual furniture items, **prefer \`place_in_room\` and \`place_against_wall\`** over \`place_furniture\`:
+
+\`\`\`
+// \u274C Error-prone: manually computing coordinates
+place_furniture({ type: "double-bed", position: [5.75, 0, 3.3], rotation: 0 })
+
+// \u2705 Reliable: semantic anchor \u2014 system computes exact position
+place_in_room({ type: "double-bed", anchor: "north-wall", orientation: "facing-south", roomOrigin: [4, 0], roomWidth: 3.5, roomDepth: 4 })
+
+// \u2705 Wall-relative \u2014 system computes perpendicular offset
+place_against_wall({ type: "bookshelf", wallId: "wall_abc", position_t: 0.3, facing: "toward-wall" })
+\`\`\`
+
+### Validation Feedback Loop
+After every scene modification, the system auto-validates and may inject a \`[Spatial Auto-Validation Report]\`. Read it carefully:
+- \u{1F527} = auto-fixed (wall snaps, furniture nudged inside room)
+- \u26A0\uFE0F = warning (gaps, overlaps you should address)
+- \u{1F4D0} / \`[code]\` = building-code or safety warning that must be resolved before the next design phase
+
+Use the tips in the report to avoid repeating the same mistakes.
+
+### Building-Code Guardrails
+
+These checks are simplified modeling guardrails, not a stamped code review. Still, obey them during generation:
+
+| Topic | Target |
+|---|---|
+| Room door clear width | \u2265 0.80 m |
+| Main corridor / circulation width | \u2265 1.10 m |
+| Normal usable room short side | \u2265 1.80 m |
+| Room aspect ratio | Prefer \u2264 3:1 unless it is explicitly a corridor |
+| Window sill | Keep bottom \u2265 0.75 m unless guard/fall protection is modeled |
+| Daylight / ventilation | Living rooms, bedrooms, kitchens, baths should have exterior windows or ventilation strategy |
+| Upper-floor exterior doors | Must open to balcony/slab/stair landing, never directly to void |
+| Door clearance | Keep at least about 0.50 m clear in front of doors; do not block with furniture |
+
+If a user asks for a layout that conflicts with these targets, explain the assumption and adjust conservatively.
+
+## Architectural Design Intelligence
+
+### Design Principles
+
+When designing any building, apply these principles:
+
+1. **Circulation**: Ensure clear movement paths between rooms. Entry \u2192 living area \u2192 private rooms. Never dead-end a living room.
+2. **Public/Private Zoning**: Public spaces (living, dining, kitchen) near the entrance; private spaces (bedrooms, study) further away.
+3. **Wet/Dry Separation**: Group wet rooms (kitchen, bathroom) together \u2014 they share plumbing walls. Keep them away from bedrooms.
+4. **Natural Light**: Living rooms and bedrooms should have exterior walls for windows. Bathrooms and storage can be interior.
+5. **Adjacency Logic**: Kitchen \u2194 Dining (serving), Bedroom \u2194 Bathroom (convenience), Living \u2194 Balcony (view).
+6. **Room Proportions**: Avoid overly narrow rooms. Width:Depth ratio should be between 1:1 and 1:2. A 2\xD78m room is bad; a 3\xD75m room is good.
+7. **Entry Sequence**: The front door should open to a hallway or living room, never directly into a bedroom or bathroom.
+8. **Furniture Clearance**: Account for wall thickness (0.15m) when placing furniture. furnish_room handles this automatically.
+
+### Plan Shape Variety
+
+> \u26A0\uFE0F **CRITICAL**: Do NOT always generate rectangular grid layouts. Choose the shape that best fits the user's needs.
+
+| Shape | When to Use | How to Build |
+|---|---|---|
+| **Grid (\u77E9\u5F62\u7F51\u683C)** | Simple apartments, efficient use of space | \`create_apartment\` with rooms in rows |
+| **L-Shape (L\u5F62)** | Corner lots, separating public/private zones | Two \`create_apartment\` calls at 90\xB0, or \`create_l_shaped_room\` + additions |
+| **U-Shape (U\u5F62)** | Courtyard-centered, good natural light | Three wings around a central void |
+| **T-Shape (T\u5F62)** | One main corridor with wings | Central hallway + perpendicular rooms |
+| **Open Plan (\u5F00\u653E\u5F0F)** | Modern living, studio apartments | Large \`create_room\` + \`create_zone\` for functional areas (no interior walls) |
+| **Hallway-Centered (\u8D70\u5ECA\u5F0F)** | Hotels, offices, long buildings | \`create_hallway\` + rooms on both sides |
+| **Courtyard (\u5EAD\u9662\u5F0F)** | Traditional, good ventilation | Rooms around a central open space |
+
+### Shape Selection Heuristics
+
+- **\u22642 rooms**: Single \`create_room\` or \`create_apartment\` grid
+- **3-4 rooms**: L-shape or compact grid \u2014 put living room at the corner for dual windows
+- **5-6 rooms**: U-shape or hallway-centered \u2014 need a circulation corridor
+- **Studio / \u5F00\u653E\u5F0F**: One large room with zones, no interior walls
+- **"\u522B\u5885" / Villa**: L or U shape, separate public/private wings
+- **"\u529E\u516C\u5BA4" / Office**: Hallway-centered with meeting rooms and offices
+
+### Planning Multi-Room Layouts
+
+When creating apartments or adjacent rooms, plan coordinates carefully:
+
+1. **Sketch the layout mentally** before any tool calls. Determine each room's origin, width, and depth.
+2. **Shared walls**: Adjacent rooms share wall segments. Place rooms so their edges align exactly.
+3. **Origin alignment**: Room origins are at the **bottom-left corner** (min X, min Z).
+4. **Row wrapping**: \`create_apartment\` places rooms left-to-right along X, wrapping when \`maxRowWidth\` is reached.
+5. **Non-grid layouts**: For L/U/T shapes, use multiple \`create_room\` or \`create_apartment\` calls with carefully planned coordinates.
+
+Coordinate planning example (L-shaped 3BR apartment):
+\`\`\`
+Z \u2191
+8 |  [Kitchen 3\xD73] [Bath 2.5\xD73]
+5 |  [Bedroom2 3.5\xD73.5]  [Bedroom1 3.5\xD73.5]
+  |  [Living 7\xD75]
+  +\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2192 X
+0  0           7    10.5
+\`\`\`
+- Living room: origin=[0,0], 7\xD75 (large, L-corner, dual exterior walls)
+- Bedroom1: origin=[7,0], 3.5\xD75
+- Bedroom2: origin=[0,5], 3.5\xD73.5
+- Kitchen: origin=[0,5], 3\xD73 (shares wall with living)
+- Bathroom: origin=[3,5], 2.5\xD73 (shares plumbing wall with kitchen)
+
+## Door & Window Placement
+
+### position_t Parameter
+The \`position_t\` parameter (0\u20131) controls **where** along the wall the door/window center is placed:
+- \`0.0\` = at the wall's start point (avoid: may clip the edge)
+- \`0.25\` = quarter point
+- \`0.5\` = center of the wall (default, recommended)
+- \`0.75\` = three-quarter point
+- \`1.0\` = at the wall's end point (avoid: may clip the edge)
+
+**Safe range**: Keep position_t between **0.1 and 0.9** to ensure the door/window doesn't extend beyond the wall edges. For short walls, use 0.5.
+
+### Placing Multiple Doors/Windows on One Wall
+Space them evenly. For example, two windows on a 5m wall:
+- Window 1: \`position_t = 0.33\`
+- Window 2: \`position_t = 0.67\`
+
+## Furniture Placement
+
+Use \`place_furniture\` to add furniture items. All items have real 3D models. Common items:
+
+| ID | Name | Dimensions (W\xD7H\xD7D) |
+|---|---|---|
+| \`sofa\` | Sofa | 2.5 \xD7 0.8 \xD7 1.5 m |
+| \`lounge-chair\` | Lounge Chair | 1 \xD7 1.1 \xD7 1.5 m |
+| \`livingroom-chair\` | Livingroom Chair | 1.5 \xD7 0.8 \xD7 1.5 m |
+| \`coffee-table\` | Coffee Table | 2 \xD7 0.4 \xD7 1.5 m |
+| \`tv-stand\` | TV Stand | 2 \xD7 0.4 \xD7 0.5 m |
+| \`television\` | Television | 2 \xD7 1.1 \xD7 0.5 m |
+| \`bookshelf\` | Bookshelf | 1 \xD7 2 \xD7 0.5 m |
+| \`floor-lamp\` | Floor Lamp | 1 \xD7 1.9 \xD7 1 m |
+| \`double-bed\` | Double Bed | 2 \xD7 0.8 \xD7 2.5 m |
+| \`single-bed\` | Single Bed | 1.5 \xD7 0.7 \xD7 2.5 m |
+| \`bedside-table\` | Bedside Table | 0.5 \xD7 0.5 \xD7 0.5 m |
+| \`closet\` | Closet | 2 \xD7 2.5 \xD7 1 m |
+| \`dresser\` | Dresser | 1.5 \xD7 0.8 \xD7 1 m |
+| \`dining-table\` | Dining Table | 2.5 \xD7 0.8 \xD7 1 m |
+| \`dining-chair\` | Dining Chair | 0.5 \xD7 1 \xD7 0.5 m |
+| \`office-table\` | Office Table | 2 \xD7 0.8 \xD7 1 m |
+| \`office-chair\` | Office Chair | 1 \xD7 1.2 \xD7 1 m |
+| \`kitchen-counter\` | Kitchen Counter | 2 \xD7 0.8 \xD7 1 m |
+| \`fridge\` | Fridge | 1 \xD7 2 \xD7 1 m |
+| \`stove\` | Stove | 1 \xD7 1 \xD7 1 m |
+| \`toilet\` | Toilet | 1 \xD7 0.9 \xD7 1 m |
+| \`bathtub\` | Bathtub | 2.5 \xD7 0.8 \xD7 1.5 m |
+| \`bathroom-sink\` | Bathroom Sink | 2 \xD7 1 \xD7 1.5 m |
+| \`washing-machine\` | Washing Machine | 1 \xD7 1 \xD7 1 m |
+
+Use \`list_furniture\` to see ALL available items. Use \`furnish_room\` to auto-furnish a room.
+
+### Furniture Placement Tips
+- **Position**: \`[x, 0, z]\` \u2014 y is usually 0 (floor level)
+- **Rotation**: degrees around Y axis. 0 = south-facing, 90 = west, 180 = north, 270 = east
+- **Against walls**: Place furniture with a small gap (0.05m) from the wall
+- **Bed placement**: Head against a wall, e.g., \`position: [2.5, 0, 3.9]\` with \`rotation: 180\` for head against north wall
+
+## Level Management (Multi-Story Buildings)
+
+> \u26A0\uFE0F **CRITICAL**: NEVER use level tools unless the user's message **explicitly** mentions: multi-story, floors, levels, \u591A\u5C42, \u52A0\u5C42, \u697C\u5C42, second/third floor, etc. For ANY other request, just work on the current level.
+
+### Workflow for Multi-Story Building (only when requested)
+1. Design the ground floor (Level 0) with rooms, furniture, etc.
+2. \`duplicate_level\` to copy the floor plan to Level 1 (deep-copies walls, doors, windows, slabs, ceilings, zones, furniture)
+3. \`switch_level\` to Level 1 and make modifications (different rooms, furniture, etc.)
+4. Repeat for additional floors
+
+### duplicate_level Advanced Options
+- **offset**: \`[dx, dz]\` \u2014 shift all copied elements horizontally (for split-level / staggered buildings)
+- **skipRoof**: \`true\` \u2014 skip roof when duplicating mid-floors (only copy the roof on the top floor)
+- **include**: \`["wall", "slab"]\` \u2014 only copy specific element types
+- **exclude**: \`["item", "zone"]\` \u2014 copy everything except specific types (e.g., skip furniture)
+
+Example: Create a 3-story building, structure only on upper floors:
+\`\`\`
+1. Create rooms on Level 0 with furniture
+2. duplicate_level(skipRoof: true) \u2192 Level 1 (structure only for mid-floor)
+3. duplicate_level(sourceLevel: 0) \u2192 Level 2 (top floor with roof)
+\`\`\`
+
+### Level Commands
+- "\u52A0\u4E00\u5C42" / "add floor" \u2192 \`add_level\`
+- "\u5207\u6362\u52302\u5C42" / "go to level 1" \u2192 \`switch_level\` with level=1
+- "\u5220\u9664\u9876\u5C42" \u2192 \`delete_level\` (cannot delete level 0)
+- "\u590D\u5236\u697C\u5C42" / "duplicate floor" \u2192 \`duplicate_level\`
+- "\u67E5\u770B\u6240\u6709\u697C\u5C42" / "show floors" \u2192 \`list_levels\`
+- "\u9519\u5C42\u5EFA\u7B51" / "split-level" \u2192 \`duplicate_level\` with offset: [dx, dz]
+
+## Wall & Ceiling Mounted Items
+
+Use \`place_wall_item\` for wall-mounted items and \`place_ceiling_item\` for ceiling-mounted items. These are different from floor furniture (\`place_furniture\`).
+
+### Wall Items (attachTo: wall or wall-side)
+
+| ID | Name | Typical Height |
+|---|---|---|
+| \`picture\` | Picture | 1.5 m |
+| \`round-mirror\` | Round Mirror | 1.4 m |
+| \`shelf\` | Shelf | 1.2 m |
+| \`ev-wall-charger\` | EV Wall Charger | 1.0 m |
+| \`thermostat\` | Thermostat | 1.3 m |
+| \`television\` | Television | 1.2 m |
+| \`kitchen-counter\` | Kitchen Counter | 0.9 m |
+| \`kitchen-cabinet\` | Kitchen Cabinet | 1.5 m |
+| \`bathroom-sink\` | Bathroom Sink | 0.8 m |
+| \`microwave\` | Microwave | 1.2 m |
+| \`coat-rack\` | Coat Rack | 1.5 m |
+
+### Ceiling Items (attachTo: ceiling)
+
+| ID | Name |
+|---|---|
+| \`ceiling-lamp\` | Ceiling Lamp |
+| \`recessed-light\` | Recessed Light |
+| \`smoke-detector\` | Smoke Detector |
+| \`sprinkler\` | Sprinkler |
+
+### Placement Tips
+- **Wall items**: Use \`wallT\` (0\u20131) to position along the wall, \`heightOffset\` for vertical position
+- **Ceiling items**: Use \`position: [x, ceilingHeight, z]\` for horizontal placement
+- **Side**: \`front\` or \`back\` determines which face of the wall
+
+## Zone Colors
+
+Always create zone labels for named spaces. Use these recommended colors:
+
+| Space | Color | Hex |
+|---|---|---|
+| Living room | Blue | #3b82f6 |
+| Bedroom | Green | #22c55e |
+| Kitchen | Amber | #f59e0b |
+| Bathroom | Cyan | #06b6d4 |
+| Dining room | Rose | #f43f5e |
+| Study / Office | Purple | #8b5cf6 |
+| Hallway / Corridor | Gray | #6b7280 |
+| Balcony | Teal | #14b8a6 |
+
+## Response Guidelines
+
+1. **Language**: Always respond in the **same language** the user uses. If they write in Chinese, reply in Chinese.
+2. **Be concise**: Summarize what you created in 2\u20133 sentences. Include key dimensions.
+3. **List created elements**: After building, briefly mention node counts (e.g., "\u5DF2\u521B\u5EFA 4 \u9762\u5899\u30011 \u5757\u697C\u677F\u30011 \u6247\u95E8").
+4. **Explain assumptions**: If the user's request is ambiguous, state what you assumed (e.g., "\u9ED8\u8BA4\u95E8\u653E\u5728\u5357\u9762\u5899\u4E0A").
+5. **Suggest next steps**: After creating, suggest what the user might want to do next (e.g., "\u4F60\u53EF\u4EE5\u8BA9\u6211\u6DFB\u52A0\u7A97\u6237\u6216\u8C03\u6574\u5899\u9AD8"). **Never** suggest adding levels/floors unless the user explicitly asked about multi-story.
+6. **Error recovery**: If a tool call fails, explain what went wrong and try an alternative approach.
+7. **Format with Markdown**: Use **bold** for emphasis, \`code\` for IDs and dimensions, and bullet lists for summaries.
+8. **No extra tool calls**: Only call the tools needed for the user's request. Do not add bonus actions.
+
+### What NOT To Do
+
+- \u274C User says "\u521B\u5EFA\u623F\u95F4" \u2192 Do NOT also call \`add_level\` or \`duplicate_level\`
+- \u274C User says "\u521B\u5EFA\u516C\u5BD3" \u2192 Do NOT create extra levels, just build on current level
+- \u274C User says "\u653E\u4E00\u5F20\u6C99\u53D1" \u2192 Do NOT also add a floor lamp, coffee table, etc.
+- \u2705 User says "\u521B\u5EFA\u4E24\u5C42\u7684\u623F\u5B50" \u2192 OK to use \`duplicate_level\` after building Level 0
+- \u2705 User says "\u52A0\u4E00\u5C42" \u2192 OK to call \`add_level\`
+
+## Spatial Auto-Correction
+
+The system automatically validates and corrects spatial issues after every scene modification. You do NOT need to call \`validate_scene\` yourself \u2014 it runs automatically. Corrections include:
+
+- **Wall endpoint snapping**: Endpoints within 5cm are auto-snapped together
+- **Furniture bounds**: Items placed outside the room polygon are nudged inside
+- **Door/window clamping**: Positions exceeding wall length are clamped to fit
+- **Gap detection**: Warnings for walls that almost connect but don't
+
+If you see validation warnings in the context, you may want to address them (e.g., move a wall endpoint to close a gap). Use \`validate_scene\` manually only if the user asks to check spatial quality.
+
+## Undo & Deletion
+
+- "\u64A4\u9500" / "undo" / "\u53D6\u6D88" \u2192 call \`undo\`
+- "\u91CD\u505A" / "redo" \u2192 call \`redo\`
+- "\u5220\u9664\u5899" / "remove the wall" \u2192 call \`delete_node\` with the wall ID
+- "\u5168\u90E8\u5220\u9664" / "\u6E05\u7A7A" / "start over" \u2192 call \`delete_all_on_level\`
+
+## Examples
+
+### "\u521B\u5EFA\u4E00\u4E2A5\u7C73x4\u7C73\u7684\u623F\u95F4"
+\u2192 \`create_room\` with width=5, depth=4, addDoor=true, addWindows=true
+
+### "\u521B\u5EFA\u4E00\u4E2A\u4E24\u5BA4\u4E00\u5385\u7684\u516C\u5BD3"
+Plan: L-shaped layout. Living room at corner for dual exterior walls, bedrooms along one wing.
+\u2192 Step 1: \`create_room\` origin=[0,0], width=5, depth=4 (\u5BA2\u5385, with door)
+\u2192 Step 2: \`create_room\` origin=[5,0], width=3.5, depth=4 (\u5367\u5BA41)
+\u2192 Step 3: \`create_room\` origin=[0,4], width=3.5, depth=3.5 (\u5367\u5BA42)
+\u2192 Create zones for each room.
+Or use \`create_apartment\` for a simpler grid layout.
+
+### "\u521B\u5EFA\u4E00\u4E2A\u5E26\u5BB6\u5177\u7684\u4E09\u5BA4\u4E24\u5385\u4E24\u536B"
+Plan: Hallway-centered layout \u2014 main corridor with rooms on both sides.
+\`\`\`
+Z \u2191
+  | [Kitchen 3\xD73][DiningRoom 3\xD73][Bathroom2 2.5\xD73]
+  | [Hallway 1.5\xD79 \u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014]
+  | [LivingRoom 5\xD74][Bedroom1 3.5\xD74][Bedroom2 3.5\xD74]
+  +\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2192 X
+\`\`\`
+\u2192 Use \`create_furnished_apartment\` with rooms array, maxRowWidth set to total width.
+
+### "\u521B\u5EFA\u5F00\u653E\u5F0F\u5DE5\u4F5C\u5BA4 / Studio"
+Plan: One large room (8\xD76), no interior walls. Use zones to define functional areas.
+\u2192 \`create_room\` width=8, depth=6, addDoor=true, addWindows=true
+\u2192 \`create_zone\` for "\u8D77\u5C45\u533A" (left half), "\u5DE5\u4F5C\u533A" (right half), "\u53A8\u623F\u533A" (corner)
+\u2192 \`furnish_room\` roomType="living" for one area, \`place_furniture\` for others
+
+### "\u5728\u5357\u9762\u5899\u4E0A\u52A0\u4E00\u6247\u7A97\u6237"
+\u2192 \`get_scene_info\` to find the south wall's ID
+\u2192 \`add_window_to_wall\` with that wallId and position_t=0.5
+
+### "\u628A\u6240\u6709\u5899\u9AD8\u6539\u62103\u7C73"
+\u2192 \`get_scene_info\` to collect all wall IDs
+\u2192 \`batch_modify_nodes\` with all wall IDs and updates: {height: 3}
+
+### "\u521B\u5EFA\u4E00\u4E2A\u4E09\u89D2\u5F62\u7684\u623F\u95F4"
+\u2192 \`create_polygon_room\` with polygon: [[0,0], [5,0], [2.5,4]], addDoor=true, zoneName="\u4E09\u89D2\u623F\u95F4"
+
+### "\u521B\u5EFA\u522B\u5885"
+Plan: L-shaped, two wings \u2014 public (living+dining+kitchen) and private (bedrooms+bathroom).
+\u2192 Public wing: \`create_apartment\` with \u5BA2\u5385+\u9910\u5385+\u53A8\u623F along X axis
+\u2192 Private wing: \`create_apartment\` with \u5367\u5BA4+\u536B\u751F\u95F4 along Z axis, origin offset to form L
+\u2192 Connect with \`create_hallway\`
+
+### "\u64A4\u9500\u521A\u624D\u7684\u64CD\u4F5C"
+\u2192 \`undo\`
+`;
+
+// packages/editor/src/lib/agent/tools.ts
+var agentTools = [
+  {
+    type: "function",
+    function: {
+      name: "create_walls",
+      description: "Create one or more walls on the current level. Each wall is defined by start and end points [x, z] in meters. Walls should form closed loops for rooms.",
+      parameters: {
+        type: "object",
+        properties: {
+          walls: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                start: {
+                  type: "array",
+                  items: { type: "number" },
+                  minItems: 2,
+                  maxItems: 2,
+                  description: "Start point [x, z] in meters"
+                },
+                end: {
+                  type: "array",
+                  items: { type: "number" },
+                  minItems: 2,
+                  maxItems: 2,
+                  description: "End point [x, z] in meters"
+                },
+                thickness: {
+                  type: "number",
+                  description: "Wall thickness in meters (default: 0.15)"
+                },
+                height: {
+                  type: "number",
+                  description: "Wall height in meters (default: 2.8)"
+                }
+              },
+              required: ["start", "end"]
+            },
+            description: "Array of wall definitions"
+          }
+        },
+        required: ["walls"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_slab",
+      description: "Create a floor slab defined by a polygon of [x, z] points. Points should be in counter-clockwise order.",
+      parameters: {
+        type: "object",
+        properties: {
+          polygon: {
+            type: "array",
+            items: {
+              type: "array",
+              items: { type: "number" },
+              minItems: 2,
+              maxItems: 2
+            },
+            description: "Array of [x, z] points defining the slab boundary"
+          },
+          elevation: {
+            type: "number",
+            description: "Slab elevation/thickness in meters (default: 0.05)"
+          }
+        },
+        required: ["polygon"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_door",
+      description: "Create a door on a specified wall. The door is positioned along the wall using a parametric t value (0-1).",
+      parameters: {
+        type: "object",
+        properties: {
+          wallIndex: {
+            type: "integer",
+            description: "Index of the wall (from the most recently created walls) to place the door on. 0-based."
+          },
+          width: {
+            type: "number",
+            description: "Door width in meters (default: 0.9)"
+          },
+          height: {
+            type: "number",
+            description: "Door height in meters (default: 2.1)"
+          },
+          position_t: {
+            type: "number",
+            description: "Parametric position along the wall from 0 (start) to 1 (end). 0.5 = center."
+          }
+        },
+        required: ["wallIndex"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_window",
+      description: "Create a window on a specified wall. The window is positioned along the wall using a parametric t value (0-1).",
+      parameters: {
+        type: "object",
+        properties: {
+          wallIndex: {
+            type: "integer",
+            description: "Index of the wall (from the most recently created walls) to place the window on. 0-based."
+          },
+          width: {
+            type: "number",
+            description: "Window width in meters (default: 1.5)"
+          },
+          height: {
+            type: "number",
+            description: "Window height in meters (default: 1.5)"
+          },
+          position_t: {
+            type: "number",
+            description: "Parametric position along the wall from 0 (start) to 1 (end). 0.5 = center."
+          },
+          sillHeight: {
+            type: "number",
+            description: "Height of window sill from floor in meters (default: 0.9)"
+          }
+        },
+        required: ["wallIndex"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_room",
+      description: "High-level helper: Create a complete rectangular room with walls and floor slab. Optionally add a door and windows.",
+      parameters: {
+        type: "object",
+        properties: {
+          origin: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 2,
+            maxItems: 2,
+            description: "Bottom-left corner [x, z] of the room in meters (default: [0, 0])"
+          },
+          width: {
+            type: "number",
+            description: "Room width along X axis in meters"
+          },
+          depth: {
+            type: "number",
+            description: "Room depth along Z axis in meters"
+          },
+          wallHeight: {
+            type: "number",
+            description: "Wall height in meters (default: 2.8)"
+          },
+          wallThickness: {
+            type: "number",
+            description: "Wall thickness in meters (default: 0.15)"
+          },
+          addDoor: {
+            type: "boolean",
+            description: "Whether to add a door on the front wall (default: true)"
+          },
+          doorWall: {
+            type: "string",
+            enum: ["front", "back", "left", "right"],
+            description: "Which wall to place the door on (default: front)"
+          },
+          addWindows: {
+            type: "boolean",
+            description: "Whether to add windows (default: false)"
+          },
+          addCeiling: {
+            type: "boolean",
+            description: "Whether to add a ceiling (default: false)"
+          },
+          ceilingHeight: {
+            type: "number",
+            description: "Ceiling height in meters (default: wallHeight - 0.3, or 2.5)"
+          }
+        },
+        required: ["width", "depth"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_ceiling",
+      description: "Create a ceiling defined by a polygon of [x, z] points, at a given height. The polygon should match the room boundary.",
+      parameters: {
+        type: "object",
+        properties: {
+          polygon: {
+            type: "array",
+            items: {
+              type: "array",
+              items: { type: "number" },
+              minItems: 2,
+              maxItems: 2
+            },
+            description: "Array of [x, z] points defining the ceiling boundary"
+          },
+          height: {
+            type: "number",
+            description: "Ceiling height in meters (default: 2.5)"
+          }
+        },
+        required: ["polygon"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_zone",
+      description: "Create a named zone (labeled area) on the current level. Zones are colored polygonal regions used to label rooms and spaces.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: 'Name/label of the zone (e.g., "Living Room", "Kitchen", "Bedroom")'
+          },
+          polygon: {
+            type: "array",
+            items: {
+              type: "array",
+              items: { type: "number" },
+              minItems: 2,
+              maxItems: 2
+            },
+            description: "Array of [x, z] points defining the zone boundary"
+          },
+          color: {
+            type: "string",
+            description: 'Hex color for the zone (default: "#3b82f6" blue)'
+          }
+        },
+        required: ["name", "polygon"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_roof",
+      description: "Create a roof on the current level. Supports various roof types: gable, hip, shed, flat, gambrel, dutch, mansard.",
+      parameters: {
+        type: "object",
+        properties: {
+          position: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 3,
+            maxItems: 3,
+            description: "Center position [x, y, z] of the roof (default: [0, 0, 0])"
+          },
+          rotation: {
+            type: "number",
+            description: "Rotation around Y axis in degrees (default: 0)"
+          },
+          roofType: {
+            type: "string",
+            enum: ["gable", "hip", "shed", "flat", "gambrel", "dutch", "mansard"],
+            description: 'Type of roof (default: "gable")'
+          },
+          width: {
+            type: "number",
+            description: "Roof footprint width in meters (default: 8)"
+          },
+          depth: {
+            type: "number",
+            description: "Roof footprint depth in meters (default: 6)"
+          },
+          wallHeight: {
+            type: "number",
+            description: "Height of walls below the roof in meters (default: 0.5)"
+          },
+          roofHeight: {
+            type: "number",
+            description: "Height of the roof peak above walls in meters (default: 2.5)"
+          },
+          overhang: {
+            type: "number",
+            description: "Eave overhang distance in meters (default: 0.3)"
+          }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_apartment",
+      description: "High-level helper: Create a simple multi-room apartment layout. Rooms are placed adjacent to each other in rows. For complex/code-sensitive requests, use this only for the layout phase, then validate before adding openings, furniture, roof, or details.",
+      parameters: {
+        type: "object",
+        properties: {
+          origin: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 2,
+            maxItems: 2,
+            description: "Bottom-left corner [x, z] of the apartment (default: [0, 0])"
+          },
+          rooms: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: {
+                  type: "string",
+                  description: 'Room name (e.g., "Living Room", "Bedroom")'
+                },
+                width: {
+                  type: "number",
+                  description: "Room width along X axis in meters"
+                },
+                depth: {
+                  type: "number",
+                  description: "Room depth along Z axis in meters"
+                },
+                hasDoor: {
+                  type: "boolean",
+                  description: "Whether this room has a door (default: true)"
+                },
+                hasWindow: {
+                  type: "boolean",
+                  description: "Whether this room has windows (default: false)"
+                }
+              },
+              required: ["name", "width", "depth"]
+            },
+            description: "List of rooms to create. Rooms are laid out left-to-right then wrap to next row."
+          },
+          wallHeight: {
+            type: "number",
+            description: "Wall height in meters (default: 2.8)"
+          },
+          wallThickness: {
+            type: "number",
+            description: "Wall thickness in meters (default: 0.15)"
+          },
+          maxRowWidth: {
+            type: "number",
+            description: "Maximum width before wrapping to next row (default: 20)"
+          }
+        },
+        required: ["rooms"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_l_shaped_room",
+      description: "Create an L-shaped room defined by two overlapping rectangles. Creates walls, floor slab, and optional door.",
+      parameters: {
+        type: "object",
+        properties: {
+          origin: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 2,
+            maxItems: 2,
+            description: "Bottom-left corner [x, z] (default: [0, 0])"
+          },
+          mainWidth: {
+            type: "number",
+            description: "Width of the main (longer) section in meters"
+          },
+          mainDepth: {
+            type: "number",
+            description: "Depth of the main section in meters"
+          },
+          wingWidth: {
+            type: "number",
+            description: "Width of the wing (shorter) section in meters"
+          },
+          wingDepth: {
+            type: "number",
+            description: "Depth of the wing section in meters"
+          },
+          wallHeight: {
+            type: "number",
+            description: "Wall height in meters (default: 2.8)"
+          },
+          addDoor: {
+            type: "boolean",
+            description: "Whether to add a door on the front wall (default: true)"
+          }
+        },
+        required: ["mainWidth", "mainDepth", "wingWidth", "wingDepth"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "modify_node",
+      description: "Modify properties of an existing node by its ID. Can change wall height/thickness, door/window dimensions, zone color/name, etc.",
+      parameters: {
+        type: "object",
+        properties: {
+          nodeId: {
+            type: "string",
+            description: "The ID of the node to modify"
+          },
+          updates: {
+            type: "object",
+            description: "Properties to update. Depends on node type. Walls: { height, thickness }, Doors: { width, height }, Windows: { width, height }, Zones: { name, color }."
+          }
+        },
+        required: ["nodeId", "updates"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_all_on_level",
+      description: "Delete all walls, slabs, doors, windows, ceilings, zones, and roofs on the current level. Useful for starting over.",
+      parameters: {
+        type: "object",
+        properties: {
+          codeProfile: {
+            type: "string",
+            enum: ["residential_default"],
+            description: "Optional building-rule profile. Defaults to residential_default, a conservative residential modeling guardrail profile."
+          }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_scene_info",
+      description: "Get information about the current scene: number of walls, slabs, doors, windows, ceilings, zones, roofs and their basic properties. Use this BEFORE making changes to understand the current state.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "undo",
+      description: "Undo the last scene change. Can be called multiple times to undo multiple steps.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "redo",
+      description: "Redo the last undone scene change.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_node",
+      description: "Delete a specific node by its ID. Also deletes all children (e.g., deleting a wall also removes its doors/windows).",
+      parameters: {
+        type: "object",
+        properties: {
+          nodeId: {
+            type: "string",
+            description: "The ID of the node to delete"
+          }
+        },
+        required: ["nodeId"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "select_node",
+      description: "Select a node in the viewer to highlight it. Useful after creating something so the user can see what was made.",
+      parameters: {
+        type: "object",
+        properties: {
+          nodeId: {
+            type: "string",
+            description: "The ID of the node to select"
+          }
+        },
+        required: ["nodeId"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "move_nodes",
+      description: "Move one or more nodes by a delta offset [dx, dz]. For walls this shifts both start and end points. For slabs/zones/ceilings it shifts all polygon vertices. For doors/windows it is not supported (move the parent wall instead).",
+      parameters: {
+        type: "object",
+        properties: {
+          nodeIds: {
+            type: "array",
+            items: { type: "string" },
+            description: "Array of node IDs to move"
+          },
+          delta: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 2,
+            maxItems: 2,
+            description: "Offset [dx, dz] in meters to shift the nodes"
+          }
+        },
+        required: ["nodeIds", "delta"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_door_to_wall",
+      description: "Place a door on an existing wall identified by its wall ID (not index). Use this when you know the wall ID from get_scene_info.",
+      parameters: {
+        type: "object",
+        properties: {
+          wallId: {
+            type: "string",
+            description: "The ID of the wall to place the door on"
+          },
+          width: {
+            type: "number",
+            description: "Door width in meters (default: 0.9)"
+          },
+          height: {
+            type: "number",
+            description: "Door height in meters (default: 2.1)"
+          },
+          position_t: {
+            type: "number",
+            description: "Parametric position along the wall 0-1 (default: 0.5 = center)"
+          }
+        },
+        required: ["wallId"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "add_window_to_wall",
+      description: "Place a window on an existing wall identified by its wall ID (not index). Use this when you know the wall ID from get_scene_info.",
+      parameters: {
+        type: "object",
+        properties: {
+          wallId: {
+            type: "string",
+            description: "The ID of the wall to place the window on"
+          },
+          width: {
+            type: "number",
+            description: "Window width in meters (default: 1.5)"
+          },
+          height: {
+            type: "number",
+            description: "Window height in meters (default: 1.5)"
+          },
+          position_t: {
+            type: "number",
+            description: "Parametric position along the wall 0-1 (default: 0.5 = center)"
+          },
+          sillHeight: {
+            type: "number",
+            description: "Height of window sill from floor in meters (default: 0.9)"
+          }
+        },
+        required: ["wallId"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "batch_modify_nodes",
+      description: "Modify the same property on multiple nodes at once. Useful for changing all wall heights, all zone colors, etc.",
+      parameters: {
+        type: "object",
+        properties: {
+          nodeIds: {
+            type: "array",
+            items: { type: "string" },
+            description: "Array of node IDs to modify"
+          },
+          updates: {
+            type: "object",
+            description: "Properties to update on all specified nodes"
+          }
+        },
+        required: ["nodeIds", "updates"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_polygon_room",
+      description: "Create a room from a custom polygon outline (not limited to rectangles). Creates walls along each edge, a floor slab, and optionally a door on one edge.",
+      parameters: {
+        type: "object",
+        properties: {
+          polygon: {
+            type: "array",
+            items: {
+              type: "array",
+              items: { type: "number" },
+              minItems: 2,
+              maxItems: 2
+            },
+            description: "Array of [x, z] vertices defining the room outline (at least 3 points, counter-clockwise)"
+          },
+          wallHeight: {
+            type: "number",
+            description: "Wall height in meters (default: 2.8)"
+          },
+          wallThickness: {
+            type: "number",
+            description: "Wall thickness in meters (default: 0.15)"
+          },
+          addDoor: {
+            type: "boolean",
+            description: "Whether to add a door on the first edge (default: true)"
+          },
+          doorEdgeIndex: {
+            type: "integer",
+            description: "Which edge to place the door on, 0-based (default: 0)"
+          },
+          addSlab: {
+            type: "boolean",
+            description: "Whether to add a floor slab (default: true)"
+          },
+          zoneName: {
+            type: "string",
+            description: "Optional zone label name. If provided, a zone is also created."
+          },
+          zoneColor: {
+            type: "string",
+            description: 'Hex color for the zone (default: "#3b82f6")'
+          }
+        },
+        required: ["polygon"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "place_furniture",
+      description: "Place a furniture item from the catalog on the current level. Each item has a real 3D model. Available IDs: sofa, lounge-chair, livingroom-chair, stool, coffee-table, tv-stand, bookshelf, floor-lamp, ceiling-lamp, recessed-light, table-lamp, rectangular-carpet, round-carpet, indoor-plant, small-indoor-plant, cactus, double-bed, single-bed, bunkbed, bedside-table, closet, dresser, dining-table, dining-chair, office-table, office-chair, kitchen-counter, kitchen-cabinet, kitchen, stove, fridge, microwave, toilet, bathtub, bathroom-sink, shower-square, shower-angle, washing-machine, television, computer, stairs, column, piano, pool-table, coat-rack, trash-bin, picture, round-mirror, shelf. Use list_furniture to see all items with dimensions.",
+      parameters: {
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            description: 'Catalog item ID (e.g., "sofa", "double-bed", "office-table"). See description for full list.'
+          },
+          position: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 3,
+            maxItems: 3,
+            description: "Position [x, y, z] in level coordinates. x = left/right, y = height offset (usually 0), z = front/back."
+          },
+          rotation: {
+            type: "number",
+            description: "Rotation around Y axis in degrees. 0 = facing -Z (south), 90 = facing -X (west), 180 = facing +Z (north), 270 = facing +X (east)."
+          }
+        },
+        required: ["type"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "place_in_room",
+      description: 'Place a furniture item in a room using a semantic anchor (e.g., "north-wall", "center", "southeast-corner") instead of raw coordinates. The system auto-computes the correct world position, clamping to wall interior faces. Requires room bounds (via roomOrigin+roomWidth+roomDepth or slabId). Returns bbox and containment info.',
+      parameters: {
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            description: 'Catalog item ID (e.g., "sofa", "double-bed", "office-table")'
+          },
+          anchor: {
+            type: "string",
+            enum: [
+              "center",
+              "north-wall",
+              "south-wall",
+              "east-wall",
+              "west-wall",
+              "northwest-corner",
+              "northeast-corner",
+              "southwest-corner",
+              "southeast-corner"
+            ],
+            description: 'Semantic position within the room (default: "center")'
+          },
+          orientation: {
+            type: "string",
+            description: 'Facing direction: "auto" (faces room center from anchor), "facing-north", "facing-south", "facing-east", "facing-west", or a number in degrees. Default: "auto".'
+          },
+          roomOrigin: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 2,
+            maxItems: 2,
+            description: "Room bottom-left corner [x, z]. Use spatialContext.roomBounds from create_room result."
+          },
+          roomWidth: {
+            type: "number",
+            description: "Room width (X) in meters"
+          },
+          roomDepth: {
+            type: "number",
+            description: "Room depth (Z) in meters"
+          },
+          slabId: {
+            type: "string",
+            description: "Alternative: provide slab ID instead of roomOrigin/width/depth. Room bounds will be derived from the slab polygon."
+          },
+          wallThickness: {
+            type: "number",
+            description: "Wall thickness in meters (default: 0.15). Used to compute interior bounds."
+          },
+          offsetFromWall: {
+            type: "number",
+            description: "Gap between item and wall face in meters (default: 0.05)"
+          }
+        },
+        required: ["type"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "place_against_wall",
+      description: "Place a furniture item against a specific wall, at a position along the wall (0-1). Automatically computes the correct perpendicular offset so the item sits flush against the wall interior face. Ideal for bookshelves, desks, kitchen counters, etc.",
+      parameters: {
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            description: 'Catalog item ID (e.g., "bookshelf", "kitchen-counter", "tv-stand")'
+          },
+          wallId: {
+            type: "string",
+            description: "ID of the wall to place against. Get from create_room spatialContext.wallsByFace or get_scene_info."
+          },
+          position_t: {
+            type: "number",
+            description: "Position along wall from 0 (start) to 1 (end). 0.5 = center. Default: 0.5."
+          },
+          facing: {
+            type: "string",
+            enum: ["toward-wall", "away-from-wall"],
+            description: 'Item faces toward the wall (back flush) or away from wall (front flush). Default: "toward-wall".'
+          },
+          offsetFromWall: {
+            type: "number",
+            description: "Gap between item and wall face in meters (default: 0.05)"
+          }
+        },
+        required: ["type", "wallId"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "furnish_room",
+      description: "Automatically furnish a room with appropriate furniture based on room type. Places furniture items using built-in layout presets. For small rooms (<6m\xB2), large items are automatically swapped for smaller alternatives. Supported room types: bedroom, living, kitchen, bathroom, dining, office, entryway, balcony, kids, laundry, gym, guest.",
+      parameters: {
+        type: "object",
+        properties: {
+          roomType: {
+            type: "string",
+            enum: ["bedroom", "living", "kitchen", "bathroom", "dining", "office", "entryway", "balcony", "kids", "laundry", "gym", "guest"],
+            description: "Type of room to furnish"
+          },
+          origin: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 2,
+            maxItems: 2,
+            description: "Bottom-left corner [x, z] of the room (default: [0, 0])"
+          },
+          width: {
+            type: "number",
+            description: "Room width along X axis in meters (default: 5)"
+          },
+          depth: {
+            type: "number",
+            description: "Room depth along Z axis in meters (default: 4)"
+          },
+          wallThickness: {
+            type: "number",
+            description: "Wall thickness in meters (default: 0.15). Used to compute interior space for furniture placement."
+          }
+        },
+        required: ["roomType"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_hallway",
+      description: "Create a hallway/corridor between two points. Creates two parallel walls and a floor slab. The hallway has no end walls so it can connect to rooms.",
+      parameters: {
+        type: "object",
+        properties: {
+          from: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 2,
+            maxItems: 2,
+            description: "Start center point [x, z] of the hallway"
+          },
+          to: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 2,
+            maxItems: 2,
+            description: "End center point [x, z] of the hallway"
+          },
+          width: {
+            type: "number",
+            description: "Hallway width in meters (default: 1.2)"
+          },
+          wallHeight: {
+            type: "number",
+            description: "Wall height in meters (default: 2.8)"
+          },
+          wallThickness: {
+            type: "number",
+            description: "Wall thickness in meters (default: 0.15)"
+          },
+          addSlab: {
+            type: "boolean",
+            description: "Whether to add a floor slab (default: true)"
+          }
+        },
+        required: ["from", "to"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_furniture",
+      description: "List all available furniture types in the catalog with their names, categories, and dimensions. Use this to check what furniture is available before placing items.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_building_shell",
+      description: "Create a complete single-room building shell in one call: 4 walls + floor slab + ceiling + optional roof with door and windows. Use for small/simple shells only. For houses, villas, offices, multi-room, or code-sensitive work, generate in phases and validate between phases.",
+      parameters: {
+        type: "object",
+        properties: {
+          origin: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 2,
+            maxItems: 2,
+            description: "Bottom-left corner [x, z] (default: [0, 0])"
+          },
+          width: {
+            type: "number",
+            description: "Building width along X axis in meters (default: 10)"
+          },
+          depth: {
+            type: "number",
+            description: "Building depth along Z axis in meters (default: 8)"
+          },
+          wallHeight: {
+            type: "number",
+            description: "Wall height in meters (default: 2.8)"
+          },
+          wallThickness: {
+            type: "number",
+            description: "Wall thickness in meters (default: 0.15)"
+          },
+          addRoof: {
+            type: "boolean",
+            description: "Whether to add a roof (default: true)"
+          },
+          roofType: {
+            type: "string",
+            enum: ["gable", "hip", "shed", "flat", "gambrel", "dutch", "mansard"],
+            description: 'Type of roof (default: "gable")'
+          },
+          ceilingHeight: {
+            type: "number",
+            description: "Ceiling height in meters (default: wallHeight - 0.3)"
+          }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_furnished_apartment",
+      description: "Rapid concept helper: create a simple multi-room apartment AND automatically furnish each room based on its name/type. Combines create_apartment + furnish_room. Do NOT use for complex, production, code-sensitive, multi-story, villa, office, or user-reviewed generation; instead create layout, validate, add openings, validate, then furnish.",
+      parameters: {
+        type: "object",
+        properties: {
+          origin: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 2,
+            maxItems: 2,
+            description: "Bottom-left corner [x, z] (default: [0, 0])"
+          },
+          rooms: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                name: {
+                  type: "string",
+                  description: 'Room name (e.g., "\u5BA2\u5385", "\u5367\u5BA4", "\u53A8\u623F"). Name is used to auto-detect furniture type.'
+                },
+                width: {
+                  type: "number",
+                  description: "Room width along X axis in meters"
+                },
+                depth: {
+                  type: "number",
+                  description: "Room depth along Z axis in meters"
+                },
+                roomType: {
+                  type: "string",
+                  enum: ["bedroom", "living", "kitchen", "bathroom", "dining", "office"],
+                  description: "Explicit room type for furniture (optional, auto-detected from name)"
+                },
+                hasDoor: {
+                  type: "boolean",
+                  description: "Whether this room has a door (default: true)"
+                },
+                hasWindow: {
+                  type: "boolean",
+                  description: "Whether this room has windows (default: false)"
+                }
+              },
+              required: ["name", "width", "depth"]
+            },
+            description: "List of rooms. Rooms are laid out left-to-right, wrapping at maxRowWidth."
+          },
+          wallHeight: {
+            type: "number",
+            description: "Wall height in meters (default: 2.8)"
+          },
+          wallThickness: {
+            type: "number",
+            description: "Wall thickness in meters (default: 0.15)"
+          },
+          maxRowWidth: {
+            type: "number",
+            description: "Maximum width before wrapping to next row (default: 20)"
+          }
+        },
+        required: ["rooms"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "mirror_room",
+      description: "Create a mirror copy of a room adjacent to the original. Useful for creating symmetrical layouts (e.g., two identical bedrooms side by side).",
+      parameters: {
+        type: "object",
+        properties: {
+          sourceOrigin: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 2,
+            maxItems: 2,
+            description: "Bottom-left corner [x, z] of the original room"
+          },
+          sourceWidth: {
+            type: "number",
+            description: "Width of the original room in meters"
+          },
+          sourceDepth: {
+            type: "number",
+            description: "Depth of the original room in meters"
+          },
+          axis: {
+            type: "string",
+            enum: ["x", "z"],
+            description: 'Mirror axis: "x" places new room to the right, "z" places it behind (default: "x")'
+          },
+          wallHeight: {
+            type: "number",
+            description: "Wall height in meters (default: 2.8)"
+          },
+          wallThickness: {
+            type: "number",
+            description: "Wall thickness in meters (default: 0.15)"
+          },
+          addDoor: {
+            type: "boolean",
+            description: "Whether to add a door (default: true)"
+          },
+          addWindows: {
+            type: "boolean",
+            description: "Whether to add windows (default: false)"
+          },
+          roomName: {
+            type: "string",
+            description: "Optional zone label name for the mirrored room"
+          }
+        },
+        required: ["sourceOrigin", "sourceWidth", "sourceDepth"]
+      }
+    }
+  },
+  // ── Level Management Tools ──
+  {
+    type: "function",
+    function: {
+      name: "add_level",
+      description: "Add a new level (floor) to the building. Automatically sets the level number. The new level becomes active.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: 'Optional name for the level (e.g., "2nd Floor", "Attic")'
+          }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "switch_level",
+      description: "Switch the active level by level number or ID. Use list_levels to see available levels.",
+      parameters: {
+        type: "object",
+        properties: {
+          level: {
+            type: "number",
+            description: "Level number (0 = ground floor, 1 = first floor, etc.)"
+          },
+          levelId: {
+            type: "string",
+            description: "Level node ID (alternative to level number)"
+          }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "delete_level",
+      description: "Delete a level and all its contents (walls, slabs, furniture, etc.). Cannot delete level 0 (ground floor).",
+      parameters: {
+        type: "object",
+        properties: {
+          level: {
+            type: "number",
+            description: "Level number to delete"
+          },
+          levelId: {
+            type: "string",
+            description: "Level node ID (alternative to level number)"
+          }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "rename_level",
+      description: "Rename a level. If no level specified, renames the active level.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: {
+            type: "string",
+            description: "New name for the level"
+          },
+          level: {
+            type: "number",
+            description: "Level number to rename"
+          },
+          levelId: {
+            type: "string",
+            description: "Level node ID (alternative to level number)"
+          }
+        },
+        required: ["name"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "duplicate_level",
+      description: "Deep-copy all contents of a level (walls, doors, windows, slabs, ceilings, furniture, zones, roofs) to a new level. Great for creating multi-story buildings with identical floor plans. Supports horizontal offset for split-level/staggered buildings, and selective copying to include/exclude specific element types.",
+      parameters: {
+        type: "object",
+        properties: {
+          sourceLevel: {
+            type: "number",
+            description: "Source level number to copy from (default: active level)"
+          },
+          sourceLevelId: {
+            type: "string",
+            description: "Source level ID (alternative to level number)"
+          },
+          name: {
+            type: "string",
+            description: "Name for the new level"
+          },
+          offset: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 2,
+            maxItems: 2,
+            description: "Horizontal offset [dx, dz] in meters to shift all copied elements. Use for split-level or staggered buildings. Default: [0, 0]"
+          },
+          include: {
+            type: "array",
+            items: { type: "string" },
+            description: "Only copy these element types. Values: wall, slab, ceiling, zone, roof, door, window, item. If omitted, copies everything."
+          },
+          exclude: {
+            type: "array",
+            items: { type: "string" },
+            description: "Skip these element types. Values: wall, slab, ceiling, zone, roof, door, window, item. Ignored if include is set."
+          },
+          skipRoof: {
+            type: "boolean",
+            description: 'Skip roof and roof segments (shortcut for exclude: ["roof"]). Useful for mid-floor duplication. Default: false'
+          }
+        },
+        required: []
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "list_levels",
+      description: "List all levels in the building with their content counts (walls, slabs, zones, etc.). Shows which level is currently active.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: []
+      }
+    }
+  },
+  // ── Wall/Ceiling Attached Item Tools ──
+  {
+    type: "function",
+    function: {
+      name: "place_wall_item",
+      description: "Place a wall-mounted item on a specific wall. Items include: picture, round-mirror, shelf, ev-wall-charger, thermostat, television, kitchen-counter, kitchen-cabinet, bathroom-sink, microwave, coat-rack. Use get_scene_info to find wall IDs first.",
+      parameters: {
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            description: 'Catalog item ID for the wall item (e.g., "picture", "round-mirror", "shelf")'
+          },
+          wallId: {
+            type: "string",
+            description: "ID of the wall to attach the item to"
+          },
+          wallT: {
+            type: "number",
+            description: "Position along the wall (0 = start, 0.5 = center, 1 = end). Default: 0.5"
+          },
+          heightOffset: {
+            type: "number",
+            description: "Height offset from floor in meters. Default: 1.2"
+          },
+          side: {
+            type: "string",
+            enum: ["front", "back"],
+            description: "Which side of the wall to place on. Default: front"
+          }
+        },
+        required: ["type", "wallId"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "place_ceiling_item",
+      description: "Place a ceiling-mounted item. Items include: ceiling-lamp, recessed-light, smoke-detector, sprinkler. Automatically finds the ceiling on the current level.",
+      parameters: {
+        type: "object",
+        properties: {
+          type: {
+            type: "string",
+            description: 'Catalog item ID (e.g., "ceiling-lamp", "recessed-light", "smoke-detector")'
+          },
+          position: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 3,
+            maxItems: 3,
+            description: "Position [x, y, z]. x/z = horizontal position, y = usually ceiling height."
+          },
+          ceilingId: {
+            type: "string",
+            description: "Optional ceiling node ID. If omitted, uses first ceiling on active level."
+          }
+        },
+        required: ["type"]
+      }
+    }
+  },
+  // ── Macro Building & Modeling ──
+  {
+    type: "function",
+    function: {
+      name: "auto_align_windows",
+      description: "Automatically place and align windows evenly across multiple specified walls.",
+      parameters: {
+        type: "object",
+        properties: {
+          wallIds: {
+            type: "array",
+            items: { type: "string" },
+            description: "Array of wall IDs to add windows to."
+          },
+          windowWidth: {
+            type: "number",
+            description: "Width of each window in meters (default: 1.5)."
+          },
+          windowHeight: {
+            type: "number",
+            description: "Height of each window in meters (default: 1.5)."
+          },
+          sillHeight: {
+            type: "number",
+            description: "Height of the window sill from the floor in meters (default: 0.9)."
+          },
+          spacing: {
+            type: "number",
+            description: "Target spacing between windows in meters (default: 1.0)."
+          }
+        },
+        required: ["wallIds"]
+      }
+    }
+  },
+  {
+    type: "function",
+    function: {
+      name: "build_staircase",
+      description: "Build a staircase connecting two specific levels, including necessary slab cutouts.",
+      parameters: {
+        type: "object",
+        properties: {
+          startLevelId: {
+            type: "string",
+            description: "The ID of the lower level where the staircase starts."
+          },
+          endLevelId: {
+            type: "string",
+            description: "The ID of the upper level where the staircase ends."
+          },
+          position: {
+            type: "array",
+            items: { type: "number" },
+            minItems: 3,
+            maxItems: 3,
+            description: "Position [x, y, z] on the start level where the staircase begins."
+          },
+          type: {
+            type: "string",
+            enum: ["straight", "l-shaped", "u-shaped", "spiral"],
+            description: "The type/shape of the staircase (default: straight)."
+          }
+        },
+        required: ["startLevelId", "endLevelId"]
+      }
+    }
+  },
+  // ── Spatial Validation ──
+  {
+    type: "function",
+    function: {
+      name: "validate_scene",
+      description: "Validate and auto-correct spatial issues on the current level. Fixes: wall endpoint gaps (snaps within 5cm), furniture outside room boundaries (nudges inside), door/window overflows (clamps position). Reports warnings for wall gaps, overlaps, circulation, simplified building-code guardrails, daylight/ventilation, door widths, corridor widths, room proportions, and upper-floor fall hazards. Auto-runs after every scene modification, but can be called manually to inspect before continuing.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: []
+      }
+    }
+  }
+];
+
+// packages/editor/src/store/use-agent.ts
+var SCENE_MODIFYING_TOOLS = /* @__PURE__ */ new Set([
+  "create_walls",
+  "create_slab",
+  "create_door",
+  "create_window",
+  "create_room",
+  "create_ceiling",
+  "create_zone",
+  "create_roof",
+  "create_apartment",
+  "create_l_shaped_room",
+  "create_polygon_room",
+  "create_hallway",
+  "create_building_shell",
+  "create_furnished_apartment",
+  "mirror_room",
+  "place_furniture",
+  "place_in_room",
+  "place_against_wall",
+  "furnish_room",
+  "move_nodes",
+  "modify_node",
+  "batch_modify_nodes",
+  "add_door_to_wall",
+  "add_window_to_wall",
+  "place_wall_item",
+  "place_ceiling_item",
+  "duplicate_level",
+  "auto_align_windows",
+  "build_staircase"
+]);
+var MAX_SCENE_MODIFYING_TOOLS_PER_ITERATION = 1;
+var ONE_SHOT_MACRO_TOOLS = /* @__PURE__ */ new Set([
+  "create_furnished_apartment",
+  "create_building_shell"
+]);
+var POST_LAYOUT_TOOLS = /* @__PURE__ */ new Set([
+  "create_roof",
+  "place_furniture",
+  "place_in_room",
+  "place_against_wall",
+  "furnish_room",
+  "place_wall_item",
+  "place_ceiling_item",
+  "create_furnished_apartment"
+]);
+var STORAGE_KEY = "pascal-agent-settings";
+function loadSettings() {
+  const defaults = { provider: "deepseek", apiKey: "", model: "", baseURL: "", proxyURL: "" };
+  if (typeof window === "undefined") return defaults;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed.model === "deepseek-v4-pro") {
+        parsed.model = "deepseek-chat";
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+        } catch {
+        }
+      }
+      return { ...defaults, ...parsed };
+    }
+  } catch {
+  }
+  return defaults;
+}
+function saveSettings(settings) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  } catch {
+  }
+}
+var messageCounter = 0;
+function genId() {
+  return `msg_${++messageCounter}_${Date.now()}`;
+}
+function isComplexGenerationRequest(content) {
+  const normalized = content.toLowerCase();
+  return /公寓|住宅|房子|别墅|办公室|酒店|多房|多层|整套|完整|家具|装修|模型|house|apartment|villa|office|hotel|multi|furnished|complete/.test(normalized);
+}
+function allowsRapidConcept(content) {
+  const normalized = content.toLowerCase();
+  return /快速|草图|概念|随便|rough|quick|draft|concept/.test(normalized);
+}
+function parseValidationSnapshot(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    return {
+      valid: Boolean(parsed.valid),
+      blocking: Boolean(parsed.blocking ?? (parsed.warningCount ?? 0) > 0),
+      fixedCount: parsed.fixedCount ?? 0,
+      warningCount: parsed.warningCount ?? 0,
+      issues: Array.isArray(parsed.issues) ? parsed.issues : [],
+      nextAction: parsed.nextAction,
+      issueSummary: parsed.issueSummary
+    };
+  } catch {
+    return null;
+  }
+}
+function buildValidationMessage(snapshot) {
+  const lines = ["[Spatial Auto-Validation Report]"];
+  lines.push(`Status: ${snapshot.valid ? "passed" : "needs fixes"} | Auto-fixed: ${snapshot.fixedCount} | Warnings: ${snapshot.warningCount}`);
+  if (snapshot.issueSummary && Object.keys(snapshot.issueSummary).length > 0) {
+    lines.push(`Issue summary: ${Object.entries(snapshot.issueSummary).map(([type, count]) => `${type}=${count}`).join(", ")}`);
+  }
+  if (snapshot.issues.length > 0) {
+    lines.push("");
+    for (const issue2 of snapshot.issues.slice(0, 12)) {
+      const icon = issue2.severity === "fixed" ? "\u{1F527}" : issue2.type === "code" ? "\u{1F4D0}" : "\u26A0\uFE0F";
+      lines.push(`${icon} [${issue2.type}] ${issue2.message}`);
+    }
+    if (snapshot.issues.length > 12) {
+      lines.push(`... ${snapshot.issues.length - 12} more issues omitted; use issueSummary and blockingIssues first.`);
+    }
+  }
+  lines.push("");
+  lines.push(snapshot.nextAction ?? (snapshot.blocking ? "Next action: fix the warnings before moving to the next generation phase." : "Next action: validation passed; continue to the next staged phase."));
+  if (snapshot.issues.length > 0) {
+    lines.push("");
+    lines.push("Tips to avoid these issues:");
+    if (snapshot.issues.some((i) => i.type === "bounds")) {
+      lines.push("- Furniture placement: ensure position is inside the room slab polygon. Use interiorBounds from createRoom result.");
+    }
+    if (snapshot.issues.some((i) => i.type === "snap")) {
+      lines.push("- Wall endpoints: adjacent walls should share exact coordinates. Use the same [x,z] for connected corners.");
+    }
+    if (snapshot.issues.some((i) => i.type === "gap")) {
+      lines.push("- Wall gaps detected: check that wall endpoints form a closed loop with no small gaps.");
+    }
+    if (snapshot.issues.some((i) => i.type === "overlap")) {
+      lines.push("- Overlaps: ensure doors/windows do not collide on the same wall, and furniture is spaced out to avoid collision.");
+    }
+    if (snapshot.issues.some((i) => i.type === "info")) {
+      lines.push("- Design advice: Check daylight ratios, large spans, structural support, and wet-room ventilation.");
+    }
+    if (snapshot.issues.some((i) => i.type === "code")) {
+      lines.push("- Building-code checks: Respect door/corridor clear widths, usable room proportions, daylight/ventilation, and upper-floor fall protection.");
+      lines.push("- Do not continue to furniture or roof detailing until code warnings from the structural/layout phase are resolved.");
+    }
+  }
+  return lines.join("\n");
+}
+function stagedDeferralForTool(toolName, userContent, lastValidation) {
+  if (ONE_SHOT_MACRO_TOOLS.has(toolName) && isComplexGenerationRequest(userContent) && !allowsRapidConcept(userContent)) {
+    return {
+      deferred: true,
+      tool: toolName,
+      reason: "This request is complex/code-sensitive, so one-shot macro generation is disabled. Build layout first, validate, then add openings, furniture, and details in later phases.",
+      nextAction: "Use create_apartment/create_room/create_polygon_room/create_hallway for the layout phase, then wait for validation feedback."
+    };
+  }
+  if (lastValidation?.blocking && POST_LAYOUT_TOOLS.has(toolName)) {
+    return {
+      deferred: true,
+      tool: toolName,
+      reason: "The previous validation report still has warnings. Post-layout work is blocked until those warnings are fixed.",
+      blockingIssues: lastValidation.issues.filter((issue2) => issue2.severity === "warning").slice(0, 5).map((issue2) => ({
+        type: issue2.type,
+        ruleId: issue2.ruleId,
+        nodeId: issue2.nodeId,
+        message: issue2.message
+      })),
+      nextAction: "Fix layout/code/circulation warnings using modify_node, move_nodes, add_door_to_wall, add_window_to_wall, auto_align_windows, or delete/recreate problem geometry."
+    };
+  }
+  return null;
+}
+var useAgent = create2((set2, get) => ({
+  messages: [],
+  isLoading: false,
+  error: null,
+  settings: loadSettings(),
+  showSettings: false,
+  setSettings: (partial2) => {
+    const current = get().settings;
+    const next = { ...current, ...partial2 };
+    saveSettings(next);
+    set2({ settings: next });
+  },
+  setShowSettings: (show) => set2({ showSettings: show }),
+  clearMessages: () => {
+    set2({ messages: [], error: null });
+  },
+  sendMessage: async (content) => {
+    const { settings } = get();
+    if (!settings.apiKey) {
+      set2({ error: "\u8BF7\u5148\u5728\u8BBE\u7F6E\u4E2D\u586B\u5165 API Key", showSettings: true });
+      return;
+    }
+    const userMsg = {
+      id: genId(),
+      role: "user",
+      content
+    };
+    set2((s) => ({
+      messages: [...s.messages, userMsg],
+      isLoading: true,
+      error: null
+    }));
+    try {
+      await runAgentLoop(content, get, set2);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      set2({ error: errMsg, isLoading: false });
+    }
+  }
+}));
+async function runAgentLoop(userContent, get, set2) {
+  const MAX_ITERATIONS = 10;
+  let iteration = 0;
+  let lastValidation = null;
+  while (iteration < MAX_ITERATIONS) {
+    iteration++;
+    const sceneContext = executeToolCall("get_scene_info", {});
+    const systemWithContext = `${SYSTEM_PROMPT}
+
+## Current Scene State
+${sceneContext}`;
+    const apiMessages = [
+      { role: "system", content: systemWithContext },
+      ...get().messages.map(msgToChatParam)
+    ];
+    const { settings } = get();
+    const res = await fetch("/api/ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        messages: apiMessages,
+        tools: agentTools,
+        provider: settings.provider,
+        apiKey: settings.apiKey,
+        model: settings.model || void 0,
+        baseURL: settings.baseURL || void 0,
+        proxyURL: settings.proxyURL || void 0,
+        stream: true
+      })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: "API request failed" }));
+      throw new Error(err.error || `API error: ${res.status}`);
+    }
+    const { content, toolCalls } = await parseStreamResponse(res, get, set2);
+    if (toolCalls.length > 0) {
+      const assistantMsg = {
+        id: genId(),
+        role: "assistant",
+        content,
+        toolCalls
+      };
+      set2((s) => {
+        const msgs = [...s.messages];
+        const lastMsg = msgs[msgs.length - 1];
+        if (lastMsg && lastMsg.role === "assistant" && lastMsg.isLoading) {
+          msgs.pop();
+        }
+        return { messages: [...msgs, assistantMsg] };
+      });
+      let hasSceneModification = false;
+      let sceneModificationCount = 0;
+      for (const tc of toolCalls) {
+        const toolArgs = JSON.parse(tc.arguments);
+        const isSceneModifyingTool = SCENE_MODIFYING_TOOLS.has(tc.name);
+        let result;
+        const stagedDeferral = isSceneModifyingTool ? stagedDeferralForTool(tc.name, userContent, lastValidation) : null;
+        if (stagedDeferral) {
+          result = JSON.stringify(stagedDeferral);
+        } else if (isSceneModifyingTool && sceneModificationCount >= MAX_SCENE_MODIFYING_TOOLS_PER_ITERATION) {
+          result = JSON.stringify({
+            deferred: true,
+            tool: tc.name,
+            reason: "Scene generation is staged. Review the validation report from the previous modification, then call this tool again if it is still appropriate.",
+            nextAction: "Continue with the next architectural phase only after spatial and building-code warnings are resolved."
+          });
+        } else {
+          result = executeToolCall(tc.name, toolArgs);
+          if (isSceneModifyingTool) {
+            hasSceneModification = true;
+            sceneModificationCount++;
+          }
+        }
+        const toolMsg = {
+          id: genId(),
+          role: "tool",
+          content: result,
+          toolCallId: tc.id
+        };
+        set2((s) => ({
+          messages: [...s.messages, toolMsg]
+        }));
+      }
+      if (hasSceneModification) {
+        const validationResult = executeToolCall("validate_scene", {});
+        const snapshot = parseValidationSnapshot(validationResult);
+        if (snapshot) {
+          lastValidation = snapshot;
+          const validationMsg = {
+            id: genId(),
+            role: "system",
+            content: buildValidationMessage(snapshot)
+          };
+          set2((s) => ({
+            messages: [...s.messages, validationMsg]
+          }));
+        }
+      }
+      continue;
+    }
+    set2((s) => {
+      const msgs = [...s.messages];
+      const lastMsg = msgs[msgs.length - 1];
+      if (lastMsg && lastMsg.role === "assistant" && lastMsg.isLoading) {
+        msgs[msgs.length - 1] = { ...lastMsg, isLoading: false };
+      }
+      return { messages: msgs, isLoading: false };
+    });
+    return;
+  }
+  set2({ isLoading: false });
+}
+async function parseStreamResponse(res, get, set2) {
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let content = "";
+  const toolCallMap = /* @__PURE__ */ new Map();
+  const streamMsgId = genId();
+  let buffer = "";
+  set2((s) => ({
+    messages: [
+      ...s.messages,
+      { id: streamMsgId, role: "assistant", content: "", isLoading: true }
+    ]
+  }));
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || !trimmed.startsWith("data: ")) continue;
+      const payload = trimmed.slice(6);
+      if (payload === "[DONE]") continue;
+      try {
+        const chunk = JSON.parse(payload);
+        if (chunk.error) {
+          throw new Error(chunk.error);
+        }
+        const delta = chunk.choices?.[0]?.delta;
+        if (!delta) continue;
+        if (delta.content) {
+          content += delta.content;
+          set2((s) => {
+            const msgs = [...s.messages];
+            const idx = msgs.findIndex((m) => m.id === streamMsgId);
+            if (idx !== -1) {
+              msgs[idx] = { ...msgs[idx], content, isLoading: true };
+            }
+            return { messages: msgs };
+          });
+        }
+        if (delta.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const existing = toolCallMap.get(tc.index);
+            if (!existing) {
+              toolCallMap.set(tc.index, {
+                id: tc.id || "",
+                name: tc.function?.name || "",
+                arguments: tc.function?.arguments || ""
+              });
+            } else {
+              if (tc.id) existing.id = tc.id;
+              if (tc.function?.name) existing.name += tc.function.name;
+              if (tc.function?.arguments) existing.arguments += tc.function.arguments;
+            }
+          }
+        }
+      } catch (err) {
+        if (err instanceof Error && err.message !== "Unexpected end of JSON input") {
+          throw err;
+        }
+      }
+    }
+  }
+  const toolCalls = [];
+  const sortedKeys = [...toolCallMap.keys()].sort((a, b) => a - b);
+  for (const key of sortedKeys) {
+    toolCalls.push(toolCallMap.get(key));
+  }
+  return { content, toolCalls };
+}
+function msgToChatParam(msg) {
+  if (msg.role === "tool") {
+    return {
+      role: "tool",
+      content: msg.content,
+      tool_call_id: msg.toolCallId || ""
+    };
+  }
+  if (msg.role === "assistant" && msg.toolCalls && msg.toolCalls.length > 0) {
+    return {
+      role: "assistant",
+      content: msg.content || null,
+      tool_calls: msg.toolCalls.map((tc) => ({
+        id: tc.id,
+        type: "function",
+        function: {
+          name: tc.name,
+          arguments: tc.arguments
+        }
+      }))
+    };
+  }
+  return {
+    role: msg.role,
+    content: msg.content
+  };
+}
+
 // tooling/agent-harness/schema.ts
 function assertHarnessCase(value, filePath) {
   if (!isRecord(value)) throw new Error(`${filePath}: case must be an object`);
@@ -19760,7 +22120,12 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function getByPath(source, path2) {
+  if (path2 === "") return source;
   return path2.split(".").reduce((current, part) => {
+    if (Array.isArray(current)) {
+      const index = Number(part);
+      return Number.isInteger(index) ? current[index] : void 0;
+    }
     if (!isRecord(current)) return void 0;
     return current[part];
   }, source);
@@ -19877,7 +22242,7 @@ async function runCase(testCase, verbose) {
     for (let index = 0; index < testCase.steps.length; index++) {
       const step = testCase.steps[index];
       const args = step.args ?? {};
-      const raw = executeToolCall(step.tool, args);
+      const raw = executeHarnessStep(step.tool, args);
       const parsed = parseToolResult(raw);
       stepResults.push({ index, tool: step.tool, args, raw, parsed });
       if (verbose) console.log(`  step ${index}: ${step.tool} -> ${summarizeResult(parsed)}`);
@@ -19922,12 +22287,20 @@ function evaluateAssertion(assertion, steps, validation) {
   switch (assertion.type) {
     case "toolResult.success":
       return assertToolResultSuccess(assertion.step, assertion.expected ?? true, steps);
+    case "toolResult.field":
+      return assertToolResultField(assertion, steps);
     case "node.count":
       return assertNodeCount(assertion);
     case "node.exists":
       return assertNodeExists(assertion);
     case "geometry.closedWalls":
       return assertClosedWalls(assertion.tolerance ?? 1e-3);
+    case "geometry.minClearance":
+      return assertMinClearance(assertion);
+    case "geometry.noSlabOverlap":
+      return assertNoSlabOverlap();
+    case "geometry.openingsFitWall":
+      return assertOpeningsFitWall();
     case "validation":
       return assertValidation(assertion, validation);
     default:
@@ -19938,6 +22311,16 @@ function evaluateAssertion(assertion, steps, validation) {
       };
   }
 }
+function executeHarnessStep(tool, args) {
+  if (tool === "agent.staged_deferral") {
+    return JSON.stringify(stagedDeferralForTool(
+      String(args.toolName ?? ""),
+      String(args.userContent ?? ""),
+      isRecord(args.lastValidation) ? args.lastValidation : null
+    ));
+  }
+  return executeToolCall(tool, args);
+}
 function assertToolResultSuccess(stepIndex, expected, steps) {
   const step = steps[stepIndex];
   const actual = isRecord(step?.parsed) ? step.parsed.success === true : false;
@@ -19945,6 +22328,16 @@ function assertToolResultSuccess(stepIndex, expected, steps) {
     pass: actual === expected,
     type: "toolResult.success",
     message: `step ${stepIndex} success expected ${expected}, received ${actual}`
+  };
+}
+function assertToolResultField(assertion, steps) {
+  const step = steps[assertion.step];
+  const actual = getByPath(step?.parsed, assertion.path);
+  const pass = matchesExpectation(actual, assertion.expected);
+  return {
+    pass,
+    type: "toolResult.field",
+    message: `step ${assertion.step} field ${assertion.path} expected ${JSON.stringify(assertion.expected)}, received ${JSON.stringify(actual)}`
   };
 }
 function assertNodeCount(assertion) {
@@ -19987,6 +22380,83 @@ function assertClosedWalls(tolerance) {
     message: `closed wall loop expected, unmatched walls: ${unmatched.length ? unmatched.join(", ") : "none"}`
   };
 }
+function assertMinClearance(assertion) {
+  const nodes = use_scene_default.getState().nodes;
+  const walls = nodesByType(nodes, "wall");
+  const items = nodesByType(nodes, "item");
+  const floorItems = items.filter((item) => {
+    const attachTo = item.asset?.attachTo;
+    return attachTo !== "wall" && attachTo !== "wall-side" && attachTo !== "ceiling";
+  });
+  const doors = collectDoorInfos(walls, nodes);
+  const violations = [];
+  for (const door of doors) {
+    for (const item of floorItems) {
+      if (!item.position) continue;
+      const distance = dist2D2([door.worldX, door.worldZ], [item.position[0], item.position[2]]);
+      const radius = itemRadius(item);
+      const clearance = distance - door.width / 2 - radius;
+      if (clearance < assertion.min) {
+        violations.push(`${door.id}->${item.id}:${clearance.toFixed(2)}m`);
+      }
+    }
+  }
+  return {
+    pass: violations.length === 0,
+    type: "geometry.minClearance",
+    message: `minimum clearance ${assertion.min.toFixed(2)}m expected, violations: ${violations.length ? violations.join(", ") : "none"}`
+  };
+}
+function assertNoSlabOverlap() {
+  const slabs = nodesByType(use_scene_default.getState().nodes, "slab");
+  const overlaps = [];
+  for (let i = 0; i < slabs.length; i++) {
+    for (let j = i + 1; j < slabs.length; j++) {
+      const a = slabs[i];
+      const b = slabs[j];
+      if (!a.polygon || !b.polygon) continue;
+      if (polygonsOverlap(a.polygon, b.polygon)) overlaps.push(`${a.id}<->${b.id}`);
+    }
+  }
+  return {
+    pass: overlaps.length === 0,
+    type: "geometry.noSlabOverlap",
+    message: `no slab overlap expected, overlaps: ${overlaps.length ? overlaps.join(", ") : "none"}`
+  };
+}
+function assertOpeningsFitWall() {
+  const nodes = use_scene_default.getState().nodes;
+  const walls = nodesByType(nodes, "wall");
+  const violations = [];
+  for (const wall of walls) {
+    if (!wall.start || !wall.end) continue;
+    const wallLen = dist2D2(wall.start, wall.end);
+    const openings = [];
+    for (const childId of wall.children ?? []) {
+      const child = nodes[childId];
+      if (!isRecord(child) || child.type !== "door" && child.type !== "window") continue;
+      const position = child.position;
+      if (!Array.isArray(position) || typeof position[0] !== "number") continue;
+      const width = typeof child.width === "number" ? child.width : child.type === "door" ? 0.9 : 1.5;
+      const minX = position[0] - width / 2;
+      const maxX = position[0] + width / 2;
+      if (minX < 0 || maxX > wallLen) violations.push(`${child.id}:out-of-wall`);
+      openings.push({ id: String(child.id), minX, maxX });
+    }
+    for (let i = 0; i < openings.length; i++) {
+      for (let j = i + 1; j < openings.length; j++) {
+        const a = openings[i];
+        const b = openings[j];
+        if (a.maxX > b.minX && a.minX < b.maxX) violations.push(`${a.id}<->${b.id}:overlap`);
+      }
+    }
+  }
+  return {
+    pass: violations.length === 0,
+    type: "geometry.openingsFitWall",
+    message: `openings fit walls expected, violations: ${violations.length ? violations.join(", ") : "none"}`
+  };
+}
 function assertValidation(assertion, validation) {
   if (!isRecord(validation)) {
     return { pass: false, type: "validation", message: "validation result was not an object" };
@@ -20004,28 +22474,68 @@ function assertValidation(assertion, validation) {
   if (assertion.warningCount !== void 0 && !matchesCount(Number(validation.warningCount ?? 0), normalizeCountExpectation(assertion.warningCount))) {
     failures.push(`warningCount expected ${formatCountExpectation(normalizeCountExpectation(assertion.warningCount))}, received ${String(validation.warningCount)}`);
   }
+  if (assertion.blockingCount !== void 0 && !matchesCount(Number(validation.blockingCount ?? 0), normalizeCountExpectation(assertion.blockingCount))) {
+    failures.push(`blockingCount expected ${formatCountExpectation(normalizeCountExpectation(assertion.blockingCount))}, received ${String(validation.blockingCount)}`);
+  }
+  if (assertion.codeProfile !== void 0 && validation.codeProfile !== assertion.codeProfile) {
+    failures.push(`codeProfile expected ${assertion.codeProfile}, received ${String(validation.codeProfile)}`);
+  }
+  assertSummary("issueSummary", assertion.issueSummary, validation.issueSummary, failures);
+  assertSummary("ruleSummary", assertion.ruleSummary, validation.ruleSummary, failures);
+  const ruleIds = /* @__PURE__ */ new Set();
+  if (isRecord(validation.ruleSummary)) {
+    for (const ruleId of Object.keys(validation.ruleSummary)) ruleIds.add(ruleId);
+  }
+  if (Array.isArray(validation.issues)) {
+    for (const issue2 of validation.issues) {
+      if (isRecord(issue2) && typeof issue2.ruleId === "string") ruleIds.add(issue2.ruleId);
+    }
+  }
+  for (const ruleId of assertion.mustIncludeRuleIds ?? []) {
+    if (!ruleIds.has(ruleId)) failures.push(`ruleId ${ruleId} was not present`);
+  }
+  for (const ruleId of assertion.mustExcludeRuleIds ?? []) {
+    if (ruleIds.has(ruleId)) failures.push(`ruleId ${ruleId} was present`);
+  }
   return {
     pass: failures.length === 0,
     type: "validation",
     message: failures.length === 0 ? "validation matched expectations" : failures.join("; ")
   };
 }
+function assertSummary(label, expected, actual, failures) {
+  if (!expected) return;
+  if (!isRecord(actual)) {
+    failures.push(`${label} expected object, received ${typeof actual}`);
+    return;
+  }
+  for (const [key, countExpectation] of Object.entries(expected)) {
+    const actualValue = Number(actual[key] ?? 0);
+    const normalized = normalizeCountExpectation(countExpectation);
+    if (!matchesCount(actualValue, normalized)) {
+      failures.push(`${label}.${key} expected ${formatCountExpectation(normalized)}, received ${actualValue}`);
+    }
+  }
+}
 function matchesWhere(node, where) {
   for (const [fieldPath, expectation] of Object.entries(where)) {
     const actual = getByPath(node, fieldPath);
-    if (isFieldMatch(expectation)) {
-      if (expectation.exists !== void 0 && actual !== void 0 !== expectation.exists) return false;
-      if (expectation.notNull && actual == null) return false;
-      if (expectation.equals !== void 0 && !deepEqual(actual, expectation.equals)) return false;
-      if (expectation.approx !== void 0) {
-        if (typeof actual !== "number") return false;
-        if (Math.abs(actual - expectation.approx) > (expectation.tolerance ?? 1e-3)) return false;
-      }
-    } else if (!deepEqual(actual, expectation)) {
-      return false;
-    }
+    if (!matchesExpectation(actual, expectation)) return false;
   }
   return true;
+}
+function matchesExpectation(actual, expectation) {
+  if (isFieldMatch(expectation)) {
+    if (expectation.exists !== void 0 && actual !== void 0 !== expectation.exists) return false;
+    if (expectation.notNull && actual == null) return false;
+    if (expectation.equals !== void 0 && !deepEqual(actual, expectation.equals)) return false;
+    if (expectation.approx !== void 0) {
+      if (typeof actual !== "number") return false;
+      if (Math.abs(actual - expectation.approx) > (expectation.tolerance ?? 1e-3)) return false;
+    }
+    return true;
+  }
+  return deepEqual(actual, expectation);
 }
 function isFieldMatch(value) {
   if (!isRecord(value)) return false;
@@ -20049,6 +22559,48 @@ function formatCountExpectation(expectation) {
 }
 function dist2D2(a, b) {
   return Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2);
+}
+function pointInPolygon2(x, z2, polygon) {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const [xi, zi] = polygon[i];
+    const [xj, zj] = polygon[j];
+    const intersects = zi > z2 !== zj > z2 && x < (xj - xi) * (z2 - zi) / (zj - zi) + xi;
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+function polygonsOverlap(a, b) {
+  return a.some((point) => pointInPolygon2(point[0], point[1], b)) || b.some((point) => pointInPolygon2(point[0], point[1], a));
+}
+function collectDoorInfos(walls, nodes) {
+  const doors = [];
+  for (const wall of walls) {
+    if (!wall.start || !wall.end) continue;
+    const len = dist2D2(wall.start, wall.end);
+    if (len < 1e-3) continue;
+    const dirX = (wall.end[0] - wall.start[0]) / len;
+    const dirZ = (wall.end[1] - wall.start[1]) / len;
+    for (const childId of wall.children ?? []) {
+      const child = nodes[childId];
+      if (!isRecord(child) || child.type !== "door") continue;
+      const position = child.position;
+      if (!Array.isArray(position) || typeof position[0] !== "number") continue;
+      const width = typeof child.width === "number" ? child.width : 0.9;
+      doors.push({
+        id: String(child.id),
+        worldX: wall.start[0] + dirX * position[0],
+        worldZ: wall.start[1] + dirZ * position[0],
+        width
+      });
+    }
+  }
+  return doors;
+}
+function itemRadius(item) {
+  const size = item.asset?.size ?? [1, 1, 1];
+  const scale = item.scale ?? [1, 1, 1];
+  return Math.max(size[0] * scale[0], size[2] * scale[2]) / 2;
 }
 function deepEqual(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);

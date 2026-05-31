@@ -1,0 +1,21 @@
+{
+  "name": "negative-room-daylight",
+  "description": "A large room without exterior windows must produce room.daylight_ratio.",
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": {
+        "origin": [0, 0],
+        "width": 5,
+        "depth": 4,
+        "addDoor": true,
+        "addWindows": false
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 0 },
+    { "type": "node.count", "nodeType": "window", "exact": 0 },
+    { "type": "validation", "valid": false, "blocking": true, "blockingCount": { "min": 1 }, "ruleSummary": { "room.daylight_ratio": 1 }, "mustIncludeRuleIds": ["room.daylight_ratio"] }
+  ]
+}

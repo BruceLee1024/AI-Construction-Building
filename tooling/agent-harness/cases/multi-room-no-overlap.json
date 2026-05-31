@@ -1,0 +1,25 @@
+{
+  "name": "multi-room-no-overlap",
+  "description": "Create adjacent residential rooms and verify slabs remain adjacent without overlap.",
+  "steps": [
+    {
+      "tool": "create_apartment",
+      "args": {
+        "origin": [0, 0],
+        "rooms": [
+          { "name": "Living", "width": 5, "depth": 4, "hasDoor": true, "hasWindow": true },
+          { "name": "Bedroom", "width": 4, "depth": 4, "hasDoor": true, "hasWindow": true },
+          { "name": "Kitchen", "width": 3, "depth": 4, "hasDoor": true, "hasWindow": true }
+        ]
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 0 },
+    { "type": "node.count", "nodeType": "slab", "exact": 3 },
+    { "type": "node.count", "nodeType": "zone", "exact": 3 },
+    { "type": "geometry.noSlabOverlap" },
+    { "type": "geometry.openingsFitWall" },
+    { "type": "validation", "valid": true, "blocking": false, "blockingCount": 0, "mustExcludeRuleIds": ["geometry.slab_overlap", "room.has_door", "room.daylight_ratio"] }
+  ]
+}

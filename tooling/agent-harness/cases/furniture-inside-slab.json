@@ -28,6 +28,7 @@
     { "type": "node.count", "nodeType": "door", "exact": 1 },
     { "type": "node.count", "nodeType": "window", "exact": 3 },
     { "type": "node.exists", "nodeType": "item", "where": { "asset.id": "sofa" } },
-    { "type": "validation", "valid": true, "blocking": false, "warningCount": 0 }
+    { "type": "geometry.minClearance", "from": "doors", "to": "floorItems", "min": 0.5 },
+    { "type": "validation", "valid": true, "blocking": false, "warningCount": 0, "blockingCount": 0, "mustExcludeRuleIds": ["furniture.door_clearance", "furniture.collision"] }
   ]
 }

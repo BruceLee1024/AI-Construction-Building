@@ -449,7 +449,14 @@ export const agentTools: ChatCompletionTool[] = [
       description: 'Delete all walls, slabs, doors, windows, ceilings, zones, and roofs on the current level. Useful for starting over.',
       parameters: {
         type: 'object',
-        properties: {},
+        properties: {
+          codeProfile: {
+            type: 'string',
+            enum: ['residential_default'],
+            description:
+              'Optional building-rule profile. Defaults to residential_default, a conservative residential modeling guardrail profile.',
+          },
+        },
         required: [],
       },
     },

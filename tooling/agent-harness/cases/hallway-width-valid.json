@@ -1,0 +1,20 @@
+{
+  "name": "hallway-width-valid",
+  "description": "A hallway at the default residential clear width should not be treated as an invalid narrow room.",
+  "steps": [
+    {
+      "tool": "create_hallway",
+      "args": {
+        "from": [0, 0],
+        "to": [0, 5],
+        "width": 1.2,
+        "addSlab": true
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 0 },
+    { "type": "node.count", "nodeType": "slab", "exact": 1 },
+    { "type": "validation", "valid": true, "blocking": false, "blockingCount": 0, "mustExcludeRuleIds": ["corridor.min_width", "room.min_width", "room.aspect_ratio", "room.has_door", "room.daylight_ratio"] }
+  ]
+}

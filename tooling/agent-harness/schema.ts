@@ -19,6 +19,13 @@ export type ToolResultSuccessAssertion = {
   expected?: boolean
 }
 
+export type ToolResultFieldAssertion = {
+  type: 'toolResult.field'
+  step: number
+  path: string
+  expected: JsonValue | FieldMatch
+}
+
 export type NodeCountAssertion = {
   type: 'node.count'
   nodeType: string
@@ -45,6 +52,27 @@ export type ValidationAssertion = {
   blocking?: boolean
   fixedCount?: CountExpectation
   warningCount?: CountExpectation
+  blockingCount?: CountExpectation
+  issueSummary?: Record<string, CountExpectation>
+  ruleSummary?: Record<string, CountExpectation>
+  mustIncludeRuleIds?: string[]
+  mustExcludeRuleIds?: string[]
+  codeProfile?: string
+}
+
+export type MinClearanceAssertion = {
+  type: 'geometry.minClearance'
+  from: 'doors'
+  to: 'floorItems'
+  min: number
+}
+
+export type NoSlabOverlapAssertion = {
+  type: 'geometry.noSlabOverlap'
+}
+
+export type OpeningsFitWallAssertion = {
+  type: 'geometry.openingsFitWall'
 }
 
 export type CountExpectation =
@@ -65,9 +93,13 @@ export type FieldMatch = {
 
 export type HarnessAssertion =
   | ToolResultSuccessAssertion
+  | ToolResultFieldAssertion
   | NodeCountAssertion
   | NodeExistsAssertion
   | ClosedWallsAssertion
+  | MinClearanceAssertion
+  | NoSlabOverlapAssertion
+  | OpeningsFitWallAssertion
   | ValidationAssertion
 
 export interface HarnessCase {
@@ -150,7 +182,12 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function getByPath(source: unknown, path: string): unknown {
+  if (path === '') return source
   return path.split('.').reduce<unknown>((current, part) => {
+    if (Array.isArray(current)) {
+      const index = Number(part)
+      return Number.isInteger(index) ? current[index] : undefined
+    }
     if (!isRecord(current)) return undefined
     return current[part]
   }, source)

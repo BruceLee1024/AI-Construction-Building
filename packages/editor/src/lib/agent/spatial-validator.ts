@@ -9,6 +9,7 @@ import { pointInPolygon, getScaledDimensions } from '@pascal-app/core'
 interface ValidationIssue {
   type: 'snap' | 'bounds' | 'overlap' | 'gap' | 'info' | 'code'
   severity: 'fixed' | 'warning' | 'info'
+  ruleId: string
   nodeId: string
   message: string
 }
@@ -18,20 +19,53 @@ interface ValidationResult {
   fixedCount: number
   warningCount: number
   blockingCount: number
+  codeProfile: CodeProfileName
+}
+
+export type CodeProfileName = 'residential_default'
+
+interface CodeProfile {
+  name: CodeProfileName
+  snapThreshold: number
+  furnitureMargin: number
+  openingMargin: number
+  minDoorClearWidth: number
+  minCorridorWidth: number
+  minRoomWidth: number
+  maxRoomAspectRatio: number
+  minDaylightRatio: number
+  minWindowSillHeight: number
+  minDoorClearance: number
+  minUsableArea: number
 }
 
 // ============================================================================
 // CONSTANTS
 // ============================================================================
 
-const SNAP_THRESHOLD = 0.05 // 5cm — snap wall endpoints closer than this
-const FURNITURE_MARGIN = 0.1 // 10cm — minimum distance from wall for furniture
-const DOOR_MARGIN = 0.05 // 5cm — minimum margin from wall edge for doors/windows
-const MIN_DOOR_CLEAR_WIDTH = 0.8 // 80cm — conservative clear opening for rooms
-const MIN_CORRIDOR_WIDTH = 1.1 // 1.1m — common residential/egress corridor target
-const MIN_ROOM_WIDTH = 1.8 // avoid unusably narrow generated rooms
-const MAX_ROOM_ASPECT_RATIO = 3 // avoid 1x5m style rooms unless explicitly modeled as corridors
-const MIN_DAYLIGHT_RATIO = 0.08 // window area / floor area heuristic
+const CODE_PROFILES: Record<CodeProfileName, CodeProfile> = {
+  residential_default: {
+    name: 'residential_default',
+    snapThreshold: 0.05,
+    furnitureMargin: 0.1,
+    openingMargin: 0.05,
+    minDoorClearWidth: 0.8,
+    minCorridorWidth: 1.1,
+    minRoomWidth: 1.8,
+    maxRoomAspectRatio: 3,
+    minDaylightRatio: 0.08,
+    minWindowSillHeight: 0.15,
+    minDoorClearance: 0.5,
+    minUsableArea: 2,
+  },
+}
+
+export function resolveCodeProfile(codeProfile?: string): CodeProfile {
+  if (codeProfile && codeProfile in CODE_PROFILES) {
+    return CODE_PROFILES[codeProfile as CodeProfileName]
+  }
+  return CODE_PROFILES.residential_default
+}
 
 // ============================================================================
 // HELPERS
@@ -97,6 +131,7 @@ function closestPointOnPolygonEdge(
 function snapWallEndpoints(
   walls: WallNode[],
   issues: ValidationIssue[],
+  profile: CodeProfile,
 ): void {
   const { updateNode } = useScene.getState()
 
@@ -117,7 +152,7 @@ function snapWallEndpoints(
       if (a.wallId === b.wallId) continue
 
       const d = dist2D(a.point, b.point)
-      if (d > 0.001 && d < SNAP_THRESHOLD) {
+      if (d > 0.001 && d < profile.snapThreshold) {
         // Snap b to a (a keeps position)
         const key = `${b.wallId}-${b.which}`
         if (snapped.has(key)) continue
@@ -130,6 +165,7 @@ function snapWallEndpoints(
         issues.push({
           type: 'snap',
           severity: 'fixed',
+          ruleId: 'geometry.wall_endpoint_snap',
           nodeId: b.wallId,
           message: `Wall ${b.which} snapped to nearby endpoint (gap: ${(d * 100).toFixed(1)}cm)`,
         })
@@ -142,6 +178,7 @@ function validateFurnitureBounds(
   items: ItemNode[],
   slabs: SlabNode[],
   issues: ValidationIssue[],
+  profile: CodeProfile,
 ): void {
   if (slabs.length === 0) return
   const { updateNode } = useScene.getState()
@@ -184,8 +221,8 @@ function validateFurnitureBounds(
       const toCenter = [centroid[0] - edgePoint[0], centroid[1] - edgePoint[1]] as const
       const toCenterLen = Math.sqrt(toCenter[0] ** 2 + toCenter[1] ** 2)
       const nudge = toCenterLen > 0.01
-        ? [edgePoint[0] + (toCenter[0] / toCenterLen) * FURNITURE_MARGIN,
-           edgePoint[1] + (toCenter[1] / toCenterLen) * FURNITURE_MARGIN]
+        ? [edgePoint[0] + (toCenter[0] / toCenterLen) * profile.furnitureMargin,
+           edgePoint[1] + (toCenter[1] / toCenterLen) * profile.furnitureMargin]
         : [edgePoint[0], edgePoint[1]]
 
       updateNode(item.id as AnyNodeId, {
@@ -195,6 +232,7 @@ function validateFurnitureBounds(
       issues.push({
         type: 'bounds',
         severity: 'fixed',
+        ruleId: 'furniture.inside_slab',
         nodeId: item.id,
         message: `Item "${item.asset.name}" was outside room, nudged inside`,
       })
@@ -206,6 +244,7 @@ function validateDoorWindowFit(
   walls: WallNode[],
   nodes: Record<AnyNodeId, AnyNode>,
   issues: ValidationIssue[],
+  profile: CodeProfile,
 ): void {
   const { updateNode } = useScene.getState()
 
@@ -224,13 +263,14 @@ function validateDoorWindowFit(
 
         // Check position[0] (wall-local X) is within bounds
         const localX = door.position[0]
-        const minX = halfDoor + DOOR_MARGIN
-        const maxX = wLen - halfDoor - DOOR_MARGIN
+        const minX = halfDoor + profile.openingMargin
+        const maxX = wLen - halfDoor - profile.openingMargin
 
         if (minX > maxX) {
           issues.push({
             type: 'bounds',
             severity: 'warning',
+            ruleId: 'opening.fits_wall',
             nodeId: door.id,
             message: `Door too wide for wall (door: ${doorWidth.toFixed(2)}m, wall: ${wLen.toFixed(2)}m)`,
           })
@@ -245,6 +285,7 @@ function validateDoorWindowFit(
           issues.push({
             type: 'bounds',
             severity: 'fixed',
+            ruleId: 'opening.fits_wall',
             nodeId: door.id,
             message: `Door position clamped to fit within wall (${localX.toFixed(2)} → ${clampedX.toFixed(2)})`,
           })
@@ -255,13 +296,14 @@ function validateDoorWindowFit(
         const halfWin = winWidth / 2
 
         const localX = win.position[0]
-        const minX = halfWin + DOOR_MARGIN
-        const maxX = wLen - halfWin - DOOR_MARGIN
+        const minX = halfWin + profile.openingMargin
+        const maxX = wLen - halfWin - profile.openingMargin
 
         if (minX > maxX) {
           issues.push({
             type: 'bounds',
             severity: 'warning',
+            ruleId: 'opening.fits_wall',
             nodeId: win.id,
             message: `Window too wide for wall (window: ${winWidth.toFixed(2)}m, wall: ${wLen.toFixed(2)}m)`,
           })
@@ -276,6 +318,7 @@ function validateDoorWindowFit(
           issues.push({
             type: 'bounds',
             severity: 'fixed',
+            ruleId: 'opening.fits_wall',
             nodeId: win.id,
             message: `Window position clamped to fit within wall (${localX.toFixed(2)} → ${clampedX.toFixed(2)})`,
           })
@@ -288,6 +331,7 @@ function validateDoorWindowFit(
 function detectWallGaps(
   walls: WallNode[],
   issues: ValidationIssue[],
+  profile: CodeProfile,
 ): void {
   // Detect walls that have endpoints close to another wall's body but not connected
   for (const w of walls) {
@@ -310,10 +354,11 @@ function detectWallGaps(
         const projZ = other.start[1] + t * dz
         const d = Math.sqrt((pt[0] - projX) ** 2 + (pt[1] - projZ) ** 2)
 
-        if (d > 0.001 && d < SNAP_THRESHOLD * 2) {
+        if (d > 0.001 && d < profile.snapThreshold * 2) {
           issues.push({
             type: 'gap',
             severity: 'warning',
+            ruleId: 'geometry.wall_gap',
             nodeId: w.id,
             message: `Wall ${which} is ${(d * 100).toFixed(1)}cm from wall body (possible T-junction gap)`,
           })
@@ -523,6 +568,7 @@ function detectDoorWindowOverlap(
           issues.push({
             type: 'overlap',
             severity: 'warning',
+            ruleId: 'opening.overlap',
             nodeId: a.id,
             message: `Opening overlaps with another opening on the same wall`,
           })
@@ -555,6 +601,7 @@ function validateFurnitureCollision(
         issues.push({
           type: 'overlap',
           severity: 'warning',
+          ruleId: 'furniture.collision',
           nodeId: a.id,
           message: `Furniture "${a.asset.name}" might be colliding with "${b.asset.name}"`,
         })
@@ -592,6 +639,7 @@ function validatePhysicsAndStructure(
       issues.push({
         type: 'bounds',
         severity: 'fixed',
+        ruleId: 'furniture.floor_level',
         nodeId: item.id,
         message: `Furniture "${item.asset.name}" was floating, snapped to floor level (${highestElevation.toFixed(2)}m)`,
       })
@@ -612,6 +660,7 @@ function validatePhysicsAndStructure(
           issues.push({
             type: 'bounds',
             severity: 'fixed',
+            ruleId: 'opening.height_fits_wall',
             nodeId: door.id,
             message: `Door height exceeded wall height, scaled down`,
           })
@@ -623,6 +672,7 @@ function validatePhysicsAndStructure(
           issues.push({
             type: 'bounds',
             severity: 'warning',
+            ruleId: 'opening.height_fits_wall',
             nodeId: win.id,
             message: `Window top edge (${topEdge.toFixed(2)}m) exceeds wall height (${wallHeight.toFixed(2)}m)`,
           })
@@ -640,6 +690,7 @@ function validatePhysicsAndStructure(
       issues.push({
         type: 'info',
         severity: 'info',
+        ruleId: 'structure.large_span',
         nodeId: slab.id,
         message: `Large slab detected (${area.toFixed(1)} sqm). Ensure adequate structural support.`,
       })
@@ -653,6 +704,7 @@ function validateArchitectureDesign(
   walls: WallNode[],
   nodes: Record<AnyNodeId, AnyNode>,
   issues: ValidationIssue[],
+  profile: CodeProfile,
 ): void {
   const windowsBySlab = collectWindowsBySlab(slabs, walls, nodes)
 
@@ -673,31 +725,35 @@ function validateArchitectureDesign(
       issues.push({
         type: 'code',
         severity: 'warning',
+        ruleId: 'room.daylight_ratio',
         nodeId: slab.id,
         message: `Room/slab ${slab.id} has no associated exterior window. Add daylight/ventilation before furnishing.`,
       })
-    } else if (area >= 8 && daylightRatio < MIN_DAYLIGHT_RATIO) {
+    } else if (area >= 8 && daylightRatio < profile.minDaylightRatio) {
       issues.push({
         type: 'code',
         severity: 'warning',
+        ruleId: 'room.daylight_ratio',
         nodeId: slab.id,
         message: `Room/slab ${slab.id} daylight ratio is low (${(daylightRatio * 100).toFixed(1)}%). Add or enlarge windows.`,
       })
     }
 
-    if (!isLikelyCorridor && area >= 4 && shortSide < MIN_ROOM_WIDTH) {
+    if (!isLikelyCorridor && area >= 4 && shortSide < profile.minRoomWidth) {
       issues.push({
         type: 'code',
         severity: 'warning',
+        ruleId: 'room.min_width',
         nodeId: slab.id,
-        message: `Usable room is too narrow (${shortSide.toFixed(2)}m). Keep normal rooms at least ${MIN_ROOM_WIDTH.toFixed(1)}m wide; use hallway semantics for narrower spaces.`,
+        message: `Usable room is too narrow (${shortSide.toFixed(2)}m). Keep normal rooms at least ${profile.minRoomWidth.toFixed(1)}m wide; use hallway semantics for narrower spaces.`,
       })
     }
 
-    if (area >= 6 && aspectRatio > MAX_ROOM_ASPECT_RATIO && shortSide < MIN_CORRIDOR_WIDTH) {
+    if (area >= 6 && aspectRatio > profile.maxRoomAspectRatio && shortSide < profile.minCorridorWidth) {
       issues.push({
         type: 'code',
         severity: 'warning',
+        ruleId: 'room.aspect_ratio',
         nodeId: slab.id,
         message: `Room proportion is extreme (${aspectRatio.toFixed(1)}:1). Rebalance dimensions or model it as a corridor.`,
       })
@@ -706,6 +762,7 @@ function validateArchitectureDesign(
       issues.push({
         type: 'code',
         severity: 'warning',
+        ruleId: 'room.exterior_edge',
         nodeId: slab.id,
         message: `Enclosed room appears to have no exterior edge for natural light/ventilation.`,
       })
@@ -720,6 +777,7 @@ function checkCirculationAndSafety(
   items: ItemNode[],
   nodes: Record<AnyNodeId, AnyNode>,
   issues: ValidationIssue[],
+  profile: CodeProfile,
 ): void {
   const levelNode = nodes[levelId as AnyNodeId]
   const isGroundLevel = levelNode && levelNode.type === 'level' && (levelNode as any).level === 0
@@ -768,14 +826,15 @@ function checkCirculationAndSafety(
       const itemRadius = Math.max(dim[0], dim[2]) / 2
       
       // Minimum required clearance: door half width + 0.5m clearance + item radius
-      const requiredClearance = (door.width / 2) + 0.5 + itemRadius
+      const requiredClearance = (door.width / 2) + profile.minDoorClearance + itemRadius
       
       if (dist < requiredClearance) {
         issues.push({
           type: 'overlap',
           severity: 'warning',
+          ruleId: 'furniture.door_clearance',
           nodeId: item.id,
-          message: `Furniture "${item.asset.name}" is blocking the door (clearance < 0.5m).`,
+          message: `Furniture "${item.asset.name}" is blocking the door (clearance < ${profile.minDoorClearance.toFixed(1)}m).`,
         })
       }
     }
@@ -803,6 +862,7 @@ function checkCirculationAndSafety(
         issues.push({
           type: 'code',
           severity: 'warning',
+          ruleId: 'door.upper_floor_fall_hazard',
           nodeId: door.id,
           message: `Exterior door detected on an upper floor without a balcony/slab outside. Fall hazard!`,
         })
@@ -816,6 +876,7 @@ function validateBuildingCodeBasics(
   slabs: SlabNode[],
   nodes: Record<AnyNodeId, AnyNode>,
   issues: ValidationIssue[],
+  profile: CodeProfile,
 ): void {
   const doorsBySlab = collectDoorsBySlab(slabs, walls, nodes)
 
@@ -828,12 +889,13 @@ function validateBuildingCodeBasics(
       if (child.type === 'door') {
         const door = child as DoorNode
         const doorWidth = door.width ?? 0.9
-        if (doorWidth < MIN_DOOR_CLEAR_WIDTH) {
+        if (doorWidth < profile.minDoorClearWidth) {
           issues.push({
             type: 'code',
             severity: 'warning',
+            ruleId: 'door.clear_width',
             nodeId: door.id,
-            message: `Door width ${doorWidth.toFixed(2)}m is below the ${MIN_DOOR_CLEAR_WIDTH.toFixed(2)}m minimum clear-width target.`,
+            message: `Door width ${doorWidth.toFixed(2)}m is below the ${profile.minDoorClearWidth.toFixed(2)}m minimum clear-width target.`,
           })
         }
 
@@ -841,6 +903,7 @@ function validateBuildingCodeBasics(
           issues.push({
             type: 'code',
             severity: 'warning',
+            ruleId: 'door.wall_ratio',
             nodeId: door.id,
             message: `Door consumes too much of a short wall (${doorWidth.toFixed(2)}m door on ${wallLen.toFixed(2)}m wall).`,
           })
@@ -852,10 +915,11 @@ function validateBuildingCodeBasics(
         const sillCenter = win.position[1]
         const winHeight = win.height ?? 1.5
         const sillBottom = sillCenter - winHeight / 2
-        if (sillBottom < 0.75) {
+        if (sillBottom < profile.minWindowSillHeight) {
           issues.push({
             type: 'code',
             severity: 'warning',
+            ruleId: 'window.sill_height',
             nodeId: win.id,
             message: `Window sill is low (${sillBottom.toFixed(2)}m). Check fall protection or raise sill height.`,
           })
@@ -872,28 +936,31 @@ function validateBuildingCodeBasics(
     const area = polygonArea(slab.polygon)
     const isLikelyCorridor = longSide >= 3 && shortSide <= 1.6
 
-    if (isLikelyCorridor && shortSide < MIN_CORRIDOR_WIDTH) {
+    if (isLikelyCorridor && shortSide < profile.minCorridorWidth) {
       issues.push({
         type: 'code',
         severity: 'warning',
+        ruleId: 'corridor.min_width',
         nodeId: slab.id,
-        message: `Corridor clear width is about ${shortSide.toFixed(2)}m; keep circulation at least ${MIN_CORRIDOR_WIDTH.toFixed(2)}m wide.`,
+        message: `Corridor clear width is about ${shortSide.toFixed(2)}m; keep circulation at least ${profile.minCorridorWidth.toFixed(2)}m wide.`,
       })
     }
 
-    if (area > 0 && area < 2) {
+    if (area > 0 && area < profile.minUsableArea) {
       issues.push({
         type: 'code',
         severity: 'warning',
+        ruleId: 'room.min_area',
         nodeId: slab.id,
         message: `Room/slab area is only ${area.toFixed(1)} sqm, which is too small for a usable enclosed space.`,
       })
     }
 
-    if (area >= 4 && (doorsBySlab.get(slab.id)?.length ?? 0) === 0) {
+    if (!isLikelyCorridor && area >= 4 && (doorsBySlab.get(slab.id)?.length ?? 0) === 0) {
       issues.push({
         type: 'code',
         severity: 'warning',
+        ruleId: 'room.has_door',
         nodeId: slab.id,
         message: `Room/slab ${slab.id} has no associated door/opening. Add a doorway for circulation.`,
       })
@@ -934,6 +1001,7 @@ function detectSlabOverlaps(
         issues.push({
           type: 'overlap',
           severity: 'warning',
+          ruleId: 'geometry.slab_overlap',
           nodeId: a.id,
           message: `Room/Slab footprint overlaps with another room. Ensure they are adjacent, not intersecting.`,
         })
@@ -946,9 +1014,10 @@ function detectSlabOverlaps(
 // MAIN VALIDATOR
 // ============================================================================
 
-export function validateAndCorrectScene(levelId: string): ValidationResult {
+export function validateAndCorrectScene(levelId: string, codeProfile?: string): ValidationResult {
   const { nodes } = useScene.getState()
   const issues: ValidationIssue[] = []
+  const profile = resolveCodeProfile(codeProfile)
 
   // Collect elements on this level
   const walls: WallNode[] = []
@@ -971,23 +1040,23 @@ export function validateAndCorrectScene(levelId: string): ValidationResult {
   }
 
   // Run validations
-  snapWallEndpoints(walls, issues)
-  validateDoorWindowFit(walls, nodes, issues)
-  validateFurnitureBounds(items, slabs, issues)
-  detectWallGaps(walls, issues)
+  snapWallEndpoints(walls, issues, profile)
+  validateDoorWindowFit(walls, nodes, issues, profile)
+  validateFurnitureBounds(items, slabs, issues, profile)
+  detectWallGaps(walls, issues, profile)
   detectDoorWindowOverlap(walls, nodes, issues)
   validateFurnitureCollision(items, issues)
   validatePhysicsAndStructure(items, slabs, walls, nodes, issues)
-  validateArchitectureDesign(items, slabs, walls, nodes, issues)
-  checkCirculationAndSafety(levelId, walls, slabs, items, nodes, issues)
+  validateArchitectureDesign(items, slabs, walls, nodes, issues, profile)
+  checkCirculationAndSafety(levelId, walls, slabs, items, nodes, issues, profile)
   detectSlabOverlaps(slabs, issues)
-  validateBuildingCodeBasics(walls, slabs, nodes, issues)
+  validateBuildingCodeBasics(walls, slabs, nodes, issues, profile)
 
   const fixedCount = issues.filter((i) => i.severity === 'fixed').length
   const warningCount = issues.filter((i) => i.severity === 'warning').length
   const blockingCount = issues.filter((i) => i.severity === 'warning' && (i.type === 'code' || i.type === 'bounds' || i.type === 'gap' || i.type === 'overlap')).length
 
-  return { issues, fixedCount, warningCount, blockingCount }
+  return { issues, fixedCount, warningCount, blockingCount, codeProfile: profile.name }
 }
 
 export function formatValidationReport(result: ValidationResult): string {
@@ -996,6 +1065,13 @@ export function formatValidationReport(result: ValidationResult): string {
     acc[issue.type] = (acc[issue.type] ?? 0) + 1
     return acc
   }, {})
+  const ruleSummary = result.issues.reduce<Record<string, number>>((acc, issue) => {
+    acc[issue.ruleId] = (acc[issue.ruleId] ?? 0) + 1
+    return acc
+  }, {})
+  const blockingRuleIds = Array.from(new Set(result.issues
+    .filter((i) => i.severity === 'warning' && (i.type === 'code' || i.type === 'bounds' || i.type === 'gap' || i.type === 'overlap'))
+    .map((i) => i.ruleId)))
 
   if (result.issues.length === 0) {
     return JSON.stringify({
@@ -1004,7 +1080,10 @@ export function formatValidationReport(result: ValidationResult): string {
       fixedCount: 0,
       warningCount: 0,
       blockingCount: 0,
+      codeProfile: result.codeProfile,
       issueSummary: {},
+      ruleSummary: {},
+      blockingRuleIds: [],
       issues: [],
       message: 'No spatial or building-code issues found',
       nextAction: 'Continue to the next staged generation phase.',
@@ -1017,10 +1096,14 @@ export function formatValidationReport(result: ValidationResult): string {
     fixedCount: result.fixedCount,
     warningCount: result.warningCount,
     blockingCount: result.blockingCount,
+    codeProfile: result.codeProfile,
     issueSummary,
+    ruleSummary,
+    blockingRuleIds,
     issues: result.issues.map((i) => ({
       type: i.type,
       severity: i.severity,
+      ruleId: i.ruleId,
       nodeId: i.nodeId,
       message: i.message,
     })),

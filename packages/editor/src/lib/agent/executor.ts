@@ -131,7 +131,7 @@ export function executeToolCall(
       case 'place_ceiling_item':
         return placeCeilingItem(args)
       case 'validate_scene':
-        return validateScene()
+        return validateScene(args)
       case 'auto_align_windows':
         return autoAlignWindows(args)
       case 'build_staircase':
@@ -2565,9 +2565,9 @@ function placeCeilingItem(args: Record<string, unknown>): string {
   })
 }
 
-function validateScene(): string {
+function validateScene(args: Record<string, unknown> = {}): string {
   const levelId = getLevelId()
-  const result = validateAndCorrectScene(levelId)
+  const result = validateAndCorrectScene(levelId, args.codeProfile as string | undefined)
   return formatValidationReport(result)
 }
 
