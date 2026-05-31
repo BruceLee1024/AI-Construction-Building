@@ -1,6 +1,5 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import useScene, { clearSceneHistory } from '@pascal-app/core'
 import type { AnyNode } from '@pascal-app/core'
 import { executeToolCall } from '../../packages/editor/src/lib/agent/executor'
