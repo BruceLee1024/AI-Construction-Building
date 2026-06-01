@@ -180,8 +180,9 @@ function parseStatusPath(line) {
 function writeMarkdown(file, records) {
   const recent = records.slice(-80);
   const facts = collect(recent, "facts");
-  const notes = collect(recent, "experienceNotes");
-  const advice = collect(recent, "nextStepAdvice");
+  const summary = analyzeSession(recent);
+  const notes = mergeUnique(summary.experienceNotes, filterTemplateGuidance(collect(recent, "experienceNotes")));
+  const advice = mergeUnique(summary.nextStepAdvice, filterTemplateGuidance(collect(recent, "nextStepAdvice")));
   const toolCounts = countBy(
     recent.map((record) => record.meta?.toolName).filter(Boolean),
   );
@@ -218,6 +219,155 @@ function writeMarkdown(file, records) {
     "",
   ];
   fs.writeFileSync(file, lines.join("\n"));
+}
+
+function analyzeSession(records) {
+  const toolNames = records.map((record) => record.meta?.toolName).filter(Boolean);
+  const toolCounts = countBy(toolNames);
+  const commandClasses = collectCommandClasses(records);
+  const files = latestChangedFiles(records);
+  const fileGroups = groupFiles(files);
+  const stopCount = records.filter((record) => record.event === "Stop").length;
+  const notes = [];
+  const advice = [];
+
+  if (toolCounts.apply_patch || toolCounts.Edit || toolCounts.MultiEdit || toolCounts.Write) {
+    notes.push(
+      "This session involved code edits; the durable lesson should be tied to changed files and verification evidence, not only to tool activity.",
+    );
+  }
+  if ((toolCounts.Bash || 0) >= 3 && commandClasses.includes("inspect")) {
+    notes.push(
+      "Repeated inspection commands indicate the useful context was in the existing repository structure; future sessions should start by reading the touched modules and nearby tests before editing.",
+    );
+  }
+  if (commandClasses.includes("test")) {
+    notes.push(
+      "Tests or harness commands were part of the loop, so the strongest facts are the final changed-file set plus the last verification result recorded around the stop point.",
+    );
+  } else if (files.length > 0) {
+    notes.push(
+      "Changed files were recorded without a test-class command in the recent log window; treat the handoff as implementation progress until verification is run.",
+    );
+  }
+  if (fileGroups.length > 1) {
+    notes.push(
+      `The work crossed ${fileGroups.length} areas (${fileGroups.join(", ")}), which raises integration risk compared with a single-file change.`,
+    );
+  }
+  if (files.some((file) => file.includes("/cases/") || file.endsWith(".json"))) {
+    notes.push(
+      "Fixture or case-file changes appeared alongside source edits; keep those examples aligned with the behavior contract they are meant to prove.",
+    );
+  }
+  if (files.some((file) => file.includes("artifacts/") || file.includes("[HIDDEN]"))) {
+    notes.push(
+      "Generated artifacts changed during the session; confirm whether they are expected outputs before committing them.",
+    );
+  }
+  if (files.some((file) => file.startsWith(".codex/hooks/"))) {
+    notes.push(
+      "Hook workflow changes need verification at the generated handoff level, because a syntactically valid hook can still produce low-value summaries.",
+    );
+  }
+  if (files.includes(".codex/hooks/devlog-hook.mjs")) {
+    notes.push(
+      "Development-log quality depends on the synthesis step, not just event capture; raw PostToolUse facts need a Stop-time analysis pass to become useful lessons.",
+    );
+  }
+  if (stopCount > 1) {
+    notes.push(
+      "Multiple stop summaries occurred in one day, so the latest Markdown handoff should be read as an accumulated session log rather than a single atomic task summary.",
+    );
+  }
+
+  if (files.length > 0) {
+    advice.push(`Review the final changed-file set before the next edit: ${files.slice(0, 8).join(", ")}.`);
+  }
+  if (commandClasses.includes("test")) {
+    advice.push(
+      "Preserve the last successful test or harness command in the human handoff if the change is committed.",
+    );
+  } else {
+    advice.push(
+      "Run the smallest relevant test, typecheck, or harness command before treating this session as complete.",
+    );
+  }
+  if (files.some((file) => file.includes("/cases/") || file.endsWith(".json"))) {
+    advice.push(
+      "When adding or changing fixtures, run the focused harness case that exercises each fixture before broad regression checks.",
+    );
+  }
+  if (files.some((file) => file.includes("artifacts/"))) {
+    advice.push(
+      "Decide whether generated artifact changes should be committed, regenerated, or ignored before opening a PR.",
+    );
+  }
+  if (fileGroups.includes("hooks")) {
+    advice.push(
+      "After changing Codex hooks, trigger a local lifecycle event and inspect `.codex/devlog/YYYY-MM-DD.md` for the expected three-section handoff.",
+    );
+  }
+
+  return {
+    experienceNotes: notes,
+    nextStepAdvice: advice,
+  };
+}
+
+function collectCommandClasses(records) {
+  const classes = [];
+  for (const fact of collect(records, "facts")) {
+    const match = fact.match(/^Command class: ([^.]+)\./);
+    if (match) classes.push(match[1]);
+  }
+  return [...new Set(classes)];
+}
+
+function latestChangedFiles(records) {
+  for (const record of [...records].reverse()) {
+    const files = record.meta?.changedFiles;
+    if (Array.isArray(files) && files.length > 0) return files;
+  }
+  return [];
+}
+
+function groupFiles(files) {
+  const groups = new Set();
+  for (const file of files) {
+    if (file.startsWith(".codex/")) groups.add("hooks");
+    else if (file.startsWith("apps/")) groups.add("apps");
+    else if (file.startsWith("packages/")) groups.add("packages");
+    else if (file.startsWith("tooling/")) groups.add("tooling");
+    else if (file.startsWith("artifacts/")) groups.add("artifacts");
+    else if (file.startsWith("docs/")) groups.add("docs");
+    else groups.add("root");
+  }
+  return [...groups];
+}
+
+function mergeUnique(...lists) {
+  const seen = new Set();
+  const merged = [];
+  for (const list of lists) {
+    for (const item of list || []) {
+      const clean = String(item || "").trim();
+      if (!clean || seen.has(clean)) continue;
+      seen.add(clean);
+      merged.push(clean);
+    }
+  }
+  return merged.slice(0, 18);
+}
+
+function filterTemplateGuidance(items) {
+  const blocked = new Set([
+    "Keep objective events in facts; save interpretation for end-of-session synthesis.",
+    "Convert repeated tool observations into lessons only when the record contains supporting facts.",
+    "At Stop, review changed files and command outcomes before choosing the next smallest task.",
+    "Start the next session from the open risks, failed checks, or smallest unverified change.",
+  ]);
+  return items.filter((item) => !blocked.has(item));
 }
 
 function writeState(file, record) {
@@ -320,6 +470,7 @@ function safeRelativePath(value) {
   if (normalized.includes("[REPO]")) return normalized.replace("[REPO]/", "");
   if (path.isAbsolute(normalized)) return "[ABSOLUTE_PATH]";
   if (/^\.[A-Za-z0-9._-]+$/.test(normalized)) return normalized;
+  if (normalized.startsWith(".codex/")) return normalized;
   return normalized
     .replace(/(^|\/)\.[^/\s]+(?=\/)/g, "$1[HIDDEN]")
     .replace(/[^A-Za-z0-9._/\-[\] ?]/g, "_");

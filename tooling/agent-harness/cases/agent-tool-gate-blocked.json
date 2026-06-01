@@ -1,0 +1,64 @@
+{
+  "name": "agent-tool-gate-blocked",
+  "description": "Runtime tool gate blocks hidden tools even if a provider returns them from stale context.",
+  "steps": [
+    { "tool": "get_scene_info", "args": {} }
+  ],
+  "assertions": [
+    {
+      "type": "agent.toolGate",
+      "toolName": "place_furniture_solved",
+      "userContent": "创建一个符合中国住宅规则的两居户型，后续需要家具",
+      "sceneContext": {
+        "summary": { "walls": 0, "slabs": 0, "doors": 0, "windows": 0, "zones": 0, "roofs": 0, "items": 0, "rooms": 0 }
+      },
+      "blocked": true,
+      "phaseBlockedBy": "layout",
+      "mustIncludeAllowedTools": ["create_apartment", "create_room", "validate_scene"]
+    },
+    {
+      "type": "agent.toolGate",
+      "toolName": "create_roof",
+      "userContent": "继续给住宅摆家具",
+      "sceneContext": {
+        "summary": { "walls": 4, "slabs": 1, "doors": 1, "windows": 0, "zones": 1, "roofs": 0, "items": 0, "rooms": 1 }
+      },
+      "lastValidation": {
+        "valid": false,
+        "blocking": true,
+        "fixedCount": 0,
+        "warningCount": 1,
+        "blockingRuleIds": ["room.main_space_daylight"],
+        "issues": [],
+        "repairHints": [
+          {
+            "ruleId": "room.main_space_daylight",
+            "nodeId": "slab_1",
+            "preferredTools": ["add_window_to_wall"],
+            "suggestedAction": "Add exterior window area before roof/detail work."
+          }
+        ]
+      },
+      "blocked": true,
+      "phaseBlockedBy": "validation_repair",
+      "mustIncludeAllowedTools": ["add_window_to_wall", "validate_scene"],
+      "mustIncludeRuleIds": ["room.main_space_daylight"]
+    },
+    {
+      "type": "agent.toolGate",
+      "toolName": "place_furniture",
+      "userContent": "Place furniture in the bedroom",
+      "sceneContext": {
+        "summary": { "walls": 4, "slabs": 1, "doors": 1, "windows": 1, "zones": 1, "roofs": 0, "items": 0, "rooms": 1 },
+        "architecturalSummary": {
+          "spaces": [
+            { "slabId": "slab_1", "needsOpeningAttention": false }
+          ]
+        }
+      },
+      "blocked": true,
+      "phaseBlockedBy": "furnishing",
+      "mustIncludeAllowedTools": ["suggest_furniture_layout", "place_furniture_solved", "validate_scene"]
+    }
+  ]
+}

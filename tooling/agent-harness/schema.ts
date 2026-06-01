@@ -63,6 +63,26 @@ export type AgentToolExposureAssertion = {
   codeProfile?: string
 }
 
+export type AgentToolGateAssertion = {
+  type: 'agent.toolGate'
+  toolName: string
+  userContent: string
+  lastValidation?: Record<string, JsonValue>
+  sceneContext?: string | Record<string, JsonValue>
+  blocked?: boolean
+  phaseBlockedBy?: string
+  mustIncludeAllowedTools?: string[]
+  mustIncludeRuleIds?: string[]
+}
+
+export type AgentToolArgsAssertion = {
+  type: 'agent.toolArgs'
+  toolName: string
+  args: Record<string, JsonValue>
+  valid?: boolean
+  mustIncludeErrors?: string[]
+}
+
 export type NodeCountAssertion = {
   type: 'node.count'
   nodeType: string
@@ -150,6 +170,8 @@ export type HarnessAssertion =
   | AgentPolicyAssertion
   | AgentDeferralAssertion
   | AgentToolExposureAssertion
+  | AgentToolGateAssertion
+  | AgentToolArgsAssertion
   | NodeCountAssertion
   | NodeExistsAssertion
   | ClosedWallsAssertion

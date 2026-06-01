@@ -5,9 +5,12 @@ import type { AnyNode } from '@pascal-app/core'
 import { executeToolCall } from '../../packages/editor/src/lib/agent/executor'
 import {
   parseAgentSceneProgress,
+  buildBlockedToolResult,
+  buildInvalidToolArgumentsResult,
   resolveAgentRunPolicy,
   selectAgentToolsForPolicy,
   stagedDeferralForTool,
+  validateToolArguments,
 } from '../../packages/editor/src/store/use-agent'
 import {
   assertHarnessCase,
@@ -233,6 +236,10 @@ function evaluateAssertion(
       return assertAgentDeferral(assertion)
     case 'agent.toolExposure':
       return assertAgentToolExposure(assertion)
+    case 'agent.toolGate':
+      return assertAgentToolGate(assertion)
+    case 'agent.toolArgs':
+      return assertAgentToolArgs(assertion)
     case 'node.count':
       return assertNodeCount(assertion)
     case 'node.exists':
@@ -413,6 +420,69 @@ function assertAgentToolExposure(
     message: failures.length === 0
       ? `tool exposure matched (${exposure.exposedToolNames.join(', ')})`
       : failures.join('; '),
+  }
+}
+
+function assertAgentToolGate(
+  assertion: Extract<HarnessAssertion, { type: 'agent.toolGate' }>,
+): AssertionResult {
+  const lastValidation = isRecord(assertion.lastValidation)
+    ? assertion.lastValidation as unknown as Parameters<typeof resolveAgentRunPolicy>[1]
+    : null
+  const sceneContext = typeof assertion.sceneContext === 'string'
+    ? assertion.sceneContext
+    : isRecord(assertion.sceneContext)
+    ? JSON.stringify(assertion.sceneContext)
+    : null
+  const sceneProgress = parseAgentSceneProgress(sceneContext)
+  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress)
+  const exposure = selectAgentToolsForPolicy(policy, lastValidation)
+  const exposed = exposure.exposedToolNames.includes(assertion.toolName)
+  const result = exposed ? null : buildBlockedToolResult(assertion.toolName, policy, exposure, lastValidation)
+  const failures: string[] = []
+  const expectedBlocked = assertion.blocked ?? true
+
+  if (Boolean(result?.blocked) !== expectedBlocked) {
+    failures.push(`blocked expected ${expectedBlocked}, received ${Boolean(result?.blocked)}`)
+  }
+  if (assertion.phaseBlockedBy !== undefined && result?.phaseBlockedBy !== assertion.phaseBlockedBy) {
+    failures.push(`phaseBlockedBy expected ${assertion.phaseBlockedBy}, received ${String(result?.phaseBlockedBy)}`)
+  }
+  const allowedTools = Array.isArray(result?.allowedNextTools) ? result.allowedNextTools : []
+  for (const tool of assertion.mustIncludeAllowedTools ?? []) {
+    if (!allowedTools.includes(tool)) failures.push(`allowedNextTools missing ${tool}`)
+  }
+  const requiredRuleFixes = Array.isArray(result?.requiredRuleFixes) ? result.requiredRuleFixes : []
+  for (const ruleId of assertion.mustIncludeRuleIds ?? []) {
+    if (!requiredRuleFixes.includes(ruleId)) failures.push(`requiredRuleFixes missing ${ruleId}`)
+  }
+
+  return {
+    pass: failures.length === 0,
+    type: 'agent.toolGate',
+    message: failures.length === 0 ? 'agent tool gate matched' : failures.join('; '),
+  }
+}
+
+function assertAgentToolArgs(
+  assertion: Extract<HarnessAssertion, { type: 'agent.toolArgs' }>,
+): AssertionResult {
+  const validation = validateToolArguments(assertion.toolName, assertion.args as Record<string, unknown>)
+  const result = validation.valid ? null : buildInvalidToolArgumentsResult(assertion.toolName, validation)
+  const failures: string[] = []
+  const expectedValid = assertion.valid ?? true
+  if (validation.valid !== expectedValid) {
+    failures.push(`valid expected ${expectedValid}, received ${validation.valid}`)
+  }
+  const errorText = [...validation.errors, ...(Array.isArray(result?.argumentErrors) ? result.argumentErrors.map(String) : [])].join('\n')
+  for (const expected of assertion.mustIncludeErrors ?? []) {
+    if (!errorText.includes(expected)) failures.push(`argument errors missing ${expected}`)
+  }
+
+  return {
+    pass: failures.length === 0,
+    type: 'agent.toolArgs',
+    message: failures.length === 0 ? 'agent tool arguments matched' : failures.join('; '),
   }
 }
 

@@ -95,6 +95,12 @@ export interface AgentToolExposure {
   hiddenToolReasonSummary: string
 }
 
+export interface ToolArgumentValidationResult {
+  valid: boolean
+  errors: string[]
+  required?: string[]
+}
+
 export type AIProvider = 'openai' | 'deepseek' | 'xiaomi'
 
 export interface ChatMessage {
@@ -181,6 +187,115 @@ function wantsExactCoordinatePlacement(content: string): boolean {
 
 function agentToolName(tool: (typeof agentTools)[number]): string | null {
   return tool.type === 'function' ? tool.function.name : null
+}
+
+function findAgentTool(toolName: string): (typeof agentTools)[number] | undefined {
+  return agentTools.find((tool) => agentToolName(tool) === toolName)
+}
+
+export function validateToolArguments(
+  toolName: string,
+  args: Record<string, unknown>,
+): ToolArgumentValidationResult {
+  const tool = findAgentTool(toolName)
+  if (!tool || tool.type !== 'function') {
+    return { valid: false, errors: [`Unknown tool: ${toolName}`] }
+  }
+  const parameters = tool.function.parameters
+  if (!isSchemaObject(parameters)) return { valid: true, errors: [] }
+
+  const errors: string[] = []
+  validateSchemaValue(parameters, args, 'arguments', errors)
+  return {
+    valid: errors.length === 0,
+    errors,
+    required: Array.isArray(parameters.required)
+      ? parameters.required.filter((value): value is string => typeof value === 'string')
+      : [],
+  }
+}
+
+export function buildInvalidToolArgumentsResult(
+  toolName: string,
+  validation: ToolArgumentValidationResult,
+): Record<string, unknown> {
+  return {
+    success: false,
+    error: 'Invalid tool arguments',
+    tool: toolName,
+    argumentErrors: validation.errors,
+    requiredArguments: validation.required ?? [],
+    nextAction:
+      'Retry the same exposed tool with complete arguments that match its schema, or call get_scene_info if required IDs are missing.',
+  }
+}
+
+type JsonSchemaLike = {
+  type?: string
+  properties?: Record<string, unknown>
+  items?: unknown
+  required?: unknown[]
+  enum?: unknown[]
+  minItems?: number
+  maxItems?: number
+}
+
+function isSchemaObject(value: unknown): value is JsonSchemaLike {
+  return Boolean(value && typeof value === 'object')
+}
+
+function validateSchemaValue(
+  schema: JsonSchemaLike,
+  value: unknown,
+  path: string,
+  errors: string[],
+): void {
+  if (schema.type && !matchesJsonSchemaType(schema.type, value)) {
+    errors.push(`${path} expected ${schema.type}, received ${Array.isArray(value) ? 'array' : typeof value}`)
+    return
+  }
+
+  if (schema.enum && !schema.enum.includes(value)) {
+    errors.push(`${path} expected one of ${schema.enum.map(String).join(', ')}`)
+  }
+
+  if (schema.type === 'object' && isPlainObject(value)) {
+    for (const requiredKey of schema.required ?? []) {
+      if (typeof requiredKey === 'string' && !(requiredKey in value)) {
+        errors.push(`${path}.${requiredKey} is required`)
+      }
+    }
+    for (const [key, childSchema] of Object.entries(schema.properties ?? {})) {
+      if (key in value && isSchemaObject(childSchema)) {
+        validateSchemaValue(childSchema, value[key], `${path}.${key}`, errors)
+      }
+    }
+  }
+
+  if (schema.type === 'array' && Array.isArray(value)) {
+    if (schema.minItems !== undefined && value.length < schema.minItems) {
+      errors.push(`${path} expected at least ${schema.minItems} items`)
+    }
+    if (schema.maxItems !== undefined && value.length > schema.maxItems) {
+      errors.push(`${path} expected at most ${schema.maxItems} items`)
+    }
+    if (isSchemaObject(schema.items)) {
+      value.forEach((item, index) => validateSchemaValue(schema.items as JsonSchemaLike, item, `${path}[${index}]`, errors))
+    }
+  }
+}
+
+function matchesJsonSchemaType(type: string, value: unknown): boolean {
+  if (type === 'array') return Array.isArray(value)
+  if (type === 'object') return isPlainObject(value)
+  if (type === 'number') return typeof value === 'number' && Number.isFinite(value)
+  if (type === 'string') return typeof value === 'string'
+  if (type === 'boolean') return typeof value === 'boolean'
+  return true
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
 }
 
 export function parseAgentSceneProgress(sceneContextRaw: string | null | undefined): AgentSceneProgress | null {
@@ -333,6 +448,26 @@ export function selectAgentToolsForPolicy(
       : `${hiddenCount} tools are hidden because the current phase is ${policy.phase}; hidden tools should be used in a later stage or after validation repair.`
 
   return { tools, exposedToolNames, hiddenToolReasonSummary }
+}
+
+export function buildBlockedToolResult(
+  toolName: string,
+  policy: AgentRunPolicy,
+  exposure: Pick<AgentToolExposure, 'exposedToolNames' | 'hiddenToolReasonSummary'>,
+  lastValidation: ValidationSnapshot | null = null,
+): Record<string, unknown> {
+  return {
+    blocked: true,
+    tool: toolName,
+    phaseBlockedBy: policy.phase,
+    reason: `Tool ${toolName} is not exposed in the current agent phase.`,
+    hiddenToolReasonSummary: exposure.hiddenToolReasonSummary,
+    allowedNextTools: exposure.exposedToolNames,
+    requiredRuleFixes: lastValidation?.blockingRuleIds ?? [],
+    repairHints: lastValidation?.blocking ? (lastValidation.repairHints ?? []).slice(0, 5) : [],
+    nextAction:
+      'Choose one of allowedNextTools for this turn. If the intended tool is hidden, complete the current validation/staging phase first.',
+  }
 }
 
 function parseValidationSnapshot(raw: string): ValidationSnapshot | null {
@@ -565,6 +700,7 @@ async function runAgentLoop(
       let sceneModificationCount = 0
       for (const tc of toolCalls) {
         const isSceneModifyingTool = SCENE_MODIFYING_TOOLS.has(tc.name)
+        const isExposedTool = toolExposure.exposedToolNames.includes(tc.name)
         let result: string
         let toolArgs: Record<string, unknown> = {}
         try {
@@ -593,8 +729,13 @@ async function runAgentLoop(
         const stagedDeferral = isSceneModifyingTool
           ? stagedDeferralForTool(tc.name, userContent, lastValidation, runPolicy)
           : null
+        const argumentValidation = isExposedTool ? validateToolArguments(tc.name, toolArgs) : null
 
-        if (stagedDeferral) {
+        if (!isExposedTool) {
+          result = JSON.stringify(buildBlockedToolResult(tc.name, runPolicy, toolExposure, lastValidation))
+        } else if (argumentValidation && !argumentValidation.valid) {
+          result = JSON.stringify(buildInvalidToolArgumentsResult(tc.name, argumentValidation))
+        } else if (stagedDeferral) {
           result = JSON.stringify(stagedDeferral)
         } else if (
           isSceneModifyingTool &&
@@ -636,10 +777,11 @@ async function runAgentLoop(
         const snapshot = parseValidationSnapshot(validationResult)
         if (snapshot) {
           lastValidation = snapshot
+          const nextSceneProgress = parseAgentSceneProgress(executeToolCall('get_scene_info', {}))
           const validationMsg: ChatMessage = {
             id: genId(),
             role: 'system',
-            content: buildValidationMessage(snapshot, resolveAgentRunPolicy(userContent, snapshot)),
+            content: buildValidationMessage(snapshot, resolveAgentRunPolicy(userContent, snapshot, nextSceneProgress)),
           }
           set((s) => ({
             messages: [...s.messages, validationMsg],

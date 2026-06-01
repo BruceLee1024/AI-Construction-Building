@@ -1,0 +1,36 @@
+{
+  "name": "agent-tool-args-validation",
+  "description": "Agent validates tool arguments from schema before executing scene-modifying tools.",
+  "steps": [
+    { "tool": "get_scene_info", "args": {} }
+  ],
+  "assertions": [
+    {
+      "type": "agent.toolArgs",
+      "toolName": "create_room",
+      "args": { "width": 4 },
+      "valid": false,
+      "mustIncludeErrors": ["arguments.depth is required"]
+    },
+    {
+      "type": "agent.toolArgs",
+      "toolName": "place_furniture_solved",
+      "args": { "roomType": "garage" },
+      "valid": false,
+      "mustIncludeErrors": ["arguments.roomType expected one of"]
+    },
+    {
+      "type": "agent.toolArgs",
+      "toolName": "place_furniture",
+      "args": { "type": "sofa", "position": [1, 0] },
+      "valid": false,
+      "mustIncludeErrors": ["arguments.position expected at least 3 items"]
+    },
+    {
+      "type": "agent.toolArgs",
+      "toolName": "create_room",
+      "args": { "width": 4, "depth": 3, "origin": [0, 0] },
+      "valid": true
+    }
+  ]
+}

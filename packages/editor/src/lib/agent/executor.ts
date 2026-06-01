@@ -242,10 +242,20 @@ export function executeToolCall(
       case 'build_staircase':
         return buildStaircase(args)
       default:
-        return JSON.stringify({ error: `Unknown tool: ${name}` })
+        return JSON.stringify({
+          success: false,
+          error: `Unknown tool: ${name}`,
+          tool: name,
+          nextAction: 'Call get_scene_info or use one of the tools exposed in the current Agent Run Policy.',
+        })
     }
   } catch (err: unknown) {
-    return JSON.stringify({ error: String(err) })
+    return JSON.stringify({
+      success: false,
+      error: String(err),
+      tool: name,
+      nextAction: 'Inspect the error, then retry with valid arguments or choose a safer staged tool.',
+    })
   }
 }
 

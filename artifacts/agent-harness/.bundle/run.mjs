@@ -18472,10 +18472,20 @@ function executeToolCall(name, args) {
       case "build_staircase":
         return buildStaircase(args);
       default:
-        return JSON.stringify({ error: `Unknown tool: ${name}` });
+        return JSON.stringify({
+          success: false,
+          error: `Unknown tool: ${name}`,
+          tool: name,
+          nextAction: "Call get_scene_info or use one of the tools exposed in the current Agent Run Policy."
+        });
     }
   } catch (err) {
-    return JSON.stringify({ error: String(err) });
+    return JSON.stringify({
+      success: false,
+      error: String(err),
+      tool: name,
+      nextAction: "Inspect the error, then retry with valid arguments or choose a safer staged tool."
+    });
   }
 }
 function createWalls(args) {
@@ -23423,6 +23433,80 @@ function wantsExactCoordinatePlacement(content) {
 function agentToolName(tool) {
   return tool.type === "function" ? tool.function.name : null;
 }
+function findAgentTool(toolName) {
+  return agentTools.find((tool) => agentToolName(tool) === toolName);
+}
+function validateToolArguments(toolName, args) {
+  const tool = findAgentTool(toolName);
+  if (!tool || tool.type !== "function") {
+    return { valid: false, errors: [`Unknown tool: ${toolName}`] };
+  }
+  const parameters = tool.function.parameters;
+  if (!isSchemaObject(parameters)) return { valid: true, errors: [] };
+  const errors = [];
+  validateSchemaValue(parameters, args, "arguments", errors);
+  return {
+    valid: errors.length === 0,
+    errors,
+    required: Array.isArray(parameters.required) ? parameters.required.filter((value) => typeof value === "string") : []
+  };
+}
+function buildInvalidToolArgumentsResult(toolName, validation) {
+  return {
+    success: false,
+    error: "Invalid tool arguments",
+    tool: toolName,
+    argumentErrors: validation.errors,
+    requiredArguments: validation.required ?? [],
+    nextAction: "Retry the same exposed tool with complete arguments that match its schema, or call get_scene_info if required IDs are missing."
+  };
+}
+function isSchemaObject(value) {
+  return Boolean(value && typeof value === "object");
+}
+function validateSchemaValue(schema, value, path2, errors) {
+  if (schema.type && !matchesJsonSchemaType(schema.type, value)) {
+    errors.push(`${path2} expected ${schema.type}, received ${Array.isArray(value) ? "array" : typeof value}`);
+    return;
+  }
+  if (schema.enum && !schema.enum.includes(value)) {
+    errors.push(`${path2} expected one of ${schema.enum.map(String).join(", ")}`);
+  }
+  if (schema.type === "object" && isPlainObject2(value)) {
+    for (const requiredKey of schema.required ?? []) {
+      if (typeof requiredKey === "string" && !(requiredKey in value)) {
+        errors.push(`${path2}.${requiredKey} is required`);
+      }
+    }
+    for (const [key, childSchema] of Object.entries(schema.properties ?? {})) {
+      if (key in value && isSchemaObject(childSchema)) {
+        validateSchemaValue(childSchema, value[key], `${path2}.${key}`, errors);
+      }
+    }
+  }
+  if (schema.type === "array" && Array.isArray(value)) {
+    if (schema.minItems !== void 0 && value.length < schema.minItems) {
+      errors.push(`${path2} expected at least ${schema.minItems} items`);
+    }
+    if (schema.maxItems !== void 0 && value.length > schema.maxItems) {
+      errors.push(`${path2} expected at most ${schema.maxItems} items`);
+    }
+    if (isSchemaObject(schema.items)) {
+      value.forEach((item, index) => validateSchemaValue(schema.items, item, `${path2}[${index}]`, errors));
+    }
+  }
+}
+function matchesJsonSchemaType(type, value) {
+  if (type === "array") return Array.isArray(value);
+  if (type === "object") return isPlainObject2(value);
+  if (type === "number") return typeof value === "number" && Number.isFinite(value);
+  if (type === "string") return typeof value === "string";
+  if (type === "boolean") return typeof value === "boolean";
+  return true;
+}
+function isPlainObject2(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 function parseAgentSceneProgress(sceneContextRaw) {
   if (!sceneContextRaw) return null;
   try {
@@ -23533,6 +23617,19 @@ function selectAgentToolsForPolicy(policy, lastValidation = null) {
   const hiddenCount = agentTools.length - tools.length;
   const hiddenToolReasonSummary = hiddenCount === 0 ? "All tools are exposed for this agent turn." : `${hiddenCount} tools are hidden because the current phase is ${policy.phase}; hidden tools should be used in a later stage or after validation repair.`;
   return { tools, exposedToolNames, hiddenToolReasonSummary };
+}
+function buildBlockedToolResult(toolName, policy, exposure, lastValidation = null) {
+  return {
+    blocked: true,
+    tool: toolName,
+    phaseBlockedBy: policy.phase,
+    reason: `Tool ${toolName} is not exposed in the current agent phase.`,
+    hiddenToolReasonSummary: exposure.hiddenToolReasonSummary,
+    allowedNextTools: exposure.exposedToolNames,
+    requiredRuleFixes: lastValidation?.blockingRuleIds ?? [],
+    repairHints: lastValidation?.blocking ? (lastValidation.repairHints ?? []).slice(0, 5) : [],
+    nextAction: "Choose one of allowedNextTools for this turn. If the intended tool is hidden, complete the current validation/staging phase first."
+  };
 }
 function parseValidationSnapshot(raw) {
   try {
@@ -23712,6 +23809,7 @@ ${sceneContext}`;
       let sceneModificationCount = 0;
       for (const tc of toolCalls) {
         const isSceneModifyingTool = SCENE_MODIFYING_TOOLS.has(tc.name);
+        const isExposedTool = toolExposure.exposedToolNames.includes(tc.name);
         let result;
         let toolArgs = {};
         try {
@@ -23736,7 +23834,12 @@ ${sceneContext}`;
           continue;
         }
         const stagedDeferral = isSceneModifyingTool ? stagedDeferralForTool(tc.name, userContent, lastValidation, runPolicy) : null;
-        if (stagedDeferral) {
+        const argumentValidation = isExposedTool ? validateToolArguments(tc.name, toolArgs) : null;
+        if (!isExposedTool) {
+          result = JSON.stringify(buildBlockedToolResult(tc.name, runPolicy, toolExposure, lastValidation));
+        } else if (argumentValidation && !argumentValidation.valid) {
+          result = JSON.stringify(buildInvalidToolArgumentsResult(tc.name, argumentValidation));
+        } else if (stagedDeferral) {
           result = JSON.stringify(stagedDeferral);
         } else if (isSceneModifyingTool && sceneModificationCount >= MAX_SCENE_MODIFYING_TOOLS_PER_ITERATION) {
           result = JSON.stringify({
@@ -23769,10 +23872,11 @@ ${sceneContext}`;
         const snapshot = parseValidationSnapshot(validationResult);
         if (snapshot) {
           lastValidation = snapshot;
+          const nextSceneProgress = parseAgentSceneProgress(executeToolCall("get_scene_info", {}));
           const validationMsg = {
             id: genId(),
             role: "system",
-            content: buildValidationMessage(snapshot, resolveAgentRunPolicy(userContent, snapshot))
+            content: buildValidationMessage(snapshot, resolveAgentRunPolicy(userContent, snapshot, nextSceneProgress))
           };
           set2((s) => ({
             messages: [...s.messages, validationMsg]
@@ -24122,6 +24226,10 @@ function evaluateAssertion(assertion, steps, validation) {
       return assertAgentDeferral(assertion);
     case "agent.toolExposure":
       return assertAgentToolExposure(assertion);
+    case "agent.toolGate":
+      return assertAgentToolGate(assertion);
+    case "agent.toolArgs":
+      return assertAgentToolArgs(assertion);
     case "node.count":
       return assertNodeCount(assertion);
     case "node.exists":
@@ -24267,6 +24375,54 @@ function assertAgentToolExposure(assertion) {
     pass: failures.length === 0,
     type: "agent.toolExposure",
     message: failures.length === 0 ? `tool exposure matched (${exposure.exposedToolNames.join(", ")})` : failures.join("; ")
+  };
+}
+function assertAgentToolGate(assertion) {
+  const lastValidation = isRecord(assertion.lastValidation) ? assertion.lastValidation : null;
+  const sceneContext = typeof assertion.sceneContext === "string" ? assertion.sceneContext : isRecord(assertion.sceneContext) ? JSON.stringify(assertion.sceneContext) : null;
+  const sceneProgress = parseAgentSceneProgress(sceneContext);
+  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress);
+  const exposure = selectAgentToolsForPolicy(policy, lastValidation);
+  const exposed = exposure.exposedToolNames.includes(assertion.toolName);
+  const result = exposed ? null : buildBlockedToolResult(assertion.toolName, policy, exposure, lastValidation);
+  const failures = [];
+  const expectedBlocked = assertion.blocked ?? true;
+  if (Boolean(result?.blocked) !== expectedBlocked) {
+    failures.push(`blocked expected ${expectedBlocked}, received ${Boolean(result?.blocked)}`);
+  }
+  if (assertion.phaseBlockedBy !== void 0 && result?.phaseBlockedBy !== assertion.phaseBlockedBy) {
+    failures.push(`phaseBlockedBy expected ${assertion.phaseBlockedBy}, received ${String(result?.phaseBlockedBy)}`);
+  }
+  const allowedTools = Array.isArray(result?.allowedNextTools) ? result.allowedNextTools : [];
+  for (const tool of assertion.mustIncludeAllowedTools ?? []) {
+    if (!allowedTools.includes(tool)) failures.push(`allowedNextTools missing ${tool}`);
+  }
+  const requiredRuleFixes = Array.isArray(result?.requiredRuleFixes) ? result.requiredRuleFixes : [];
+  for (const ruleId of assertion.mustIncludeRuleIds ?? []) {
+    if (!requiredRuleFixes.includes(ruleId)) failures.push(`requiredRuleFixes missing ${ruleId}`);
+  }
+  return {
+    pass: failures.length === 0,
+    type: "agent.toolGate",
+    message: failures.length === 0 ? "agent tool gate matched" : failures.join("; ")
+  };
+}
+function assertAgentToolArgs(assertion) {
+  const validation = validateToolArguments(assertion.toolName, assertion.args);
+  const result = validation.valid ? null : buildInvalidToolArgumentsResult(assertion.toolName, validation);
+  const failures = [];
+  const expectedValid = assertion.valid ?? true;
+  if (validation.valid !== expectedValid) {
+    failures.push(`valid expected ${expectedValid}, received ${validation.valid}`);
+  }
+  const errorText = [...validation.errors, ...Array.isArray(result?.argumentErrors) ? result.argumentErrors.map(String) : []].join("\n");
+  for (const expected of assertion.mustIncludeErrors ?? []) {
+    if (!errorText.includes(expected)) failures.push(`argument errors missing ${expected}`);
+  }
+  return {
+    pass: failures.length === 0,
+    type: "agent.toolArgs",
+    message: failures.length === 0 ? "agent tool arguments matched" : failures.join("; ")
   };
 }
 function assertNodeCount(assertion) {
