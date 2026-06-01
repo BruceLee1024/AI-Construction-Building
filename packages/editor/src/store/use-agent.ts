@@ -13,7 +13,7 @@ const SCENE_MODIFYING_TOOLS = new Set([
   'create_ceiling', 'create_zone', 'create_roof', 'create_apartment',
   'create_l_shaped_room', 'create_polygon_room', 'create_hallway',
   'create_building_shell', 'create_furnished_apartment', 'mirror_room',
-  'place_furniture', 'place_in_room', 'place_against_wall', 'furnish_room', 'move_nodes', 'modify_node',
+  'place_furniture', 'place_in_room', 'place_against_wall', 'place_furniture_solved', 'furnish_room', 'move_nodes', 'modify_node',
   'batch_modify_nodes', 'add_door_to_wall', 'add_window_to_wall',
   'place_wall_item', 'place_ceiling_item', 'duplicate_level',
   'auto_align_windows', 'build_staircase',
@@ -31,6 +31,7 @@ const POST_LAYOUT_TOOLS = new Set([
   'place_furniture',
   'place_in_room',
   'place_against_wall',
+  'place_furniture_solved',
   'furnish_room',
   'place_wall_item',
   'place_ceiling_item',
@@ -181,10 +182,10 @@ export function resolveAgentRunPolicy(
     phase = 'openings'
   }
 
-  const repairTools = ['modify_node', 'move_nodes', 'batch_modify_nodes', 'add_door_to_wall', 'add_window_to_wall', 'auto_align_windows', 'delete_node', 'validate_scene']
+  const repairTools = ['modify_node', 'move_nodes', 'batch_modify_nodes', 'add_door_to_wall', 'add_window_to_wall', 'auto_align_windows', 'suggest_furniture_layout', 'place_furniture_solved', 'delete_node', 'validate_scene']
   const layoutTools = ['create_room', 'create_apartment', 'create_polygon_room', 'create_l_shaped_room', 'create_hallway', 'create_walls', 'create_slab', 'create_zone', 'validate_scene']
   const openingTools = ['create_door', 'create_window', 'add_door_to_wall', 'add_window_to_wall', 'auto_align_windows', 'create_zone', 'validate_scene']
-  const furnishingTools = ['place_furniture', 'place_in_room', 'place_against_wall', 'furnish_room', 'place_wall_item', 'place_ceiling_item', 'validate_scene']
+  const furnishingTools = ['suggest_furniture_layout', 'place_furniture_solved', 'furnish_room', 'place_in_room', 'place_against_wall', 'place_furniture', 'place_wall_item', 'place_ceiling_item', 'validate_scene']
   const roofTools = ['create_roof', 'create_ceiling', 'place_wall_item', 'place_ceiling_item', 'validate_scene']
 
   const allowedNextTools =
@@ -426,9 +427,32 @@ async function runAgentLoop(
       let hasSceneModification = false
       let sceneModificationCount = 0
       for (const tc of toolCalls) {
-        const toolArgs = JSON.parse(tc.arguments)
         const isSceneModifyingTool = SCENE_MODIFYING_TOOLS.has(tc.name)
         let result: string
+        let toolArgs: Record<string, unknown> = {}
+        try {
+          toolArgs = tc.arguments.trim() ? JSON.parse(tc.arguments) : {}
+        } catch (err) {
+          result = JSON.stringify({
+            error: 'Invalid tool arguments JSON',
+            tool: tc.name,
+            arguments: tc.arguments,
+            message: err instanceof Error ? err.message : String(err),
+            nextAction: 'Call the same tool again with complete valid JSON arguments that match the tool schema.',
+          })
+
+          const toolMsg: ChatMessage = {
+            id: genId(),
+            role: 'tool',
+            content: result,
+            toolCallId: tc.id,
+          }
+
+          set((s) => ({
+            messages: [...s.messages, toolMsg],
+          }))
+          continue
+        }
         const stagedDeferral = isSceneModifyingTool
           ? stagedDeferralForTool(tc.name, userContent, lastValidation, runPolicy)
           : null
@@ -503,7 +527,18 @@ async function runAgentLoop(
   }
 
   // Max iterations reached
-  set({ isLoading: false })
+  set((s) => ({
+    messages: [
+      ...s.messages,
+      {
+        id: genId(),
+        role: 'assistant',
+        content:
+          '工具调用已达到本轮最大迭代次数。当前场景已保留，建议先查看最近一次 validation/tool result，再继续下一步修复或生成。',
+      },
+    ],
+    isLoading: false,
+  }))
 }
 
 async function parseStreamResponse(
@@ -603,7 +638,12 @@ async function parseStreamResponse(
   const toolCalls: StreamToolCallDelta[] = []
   const sortedKeys = [...toolCallMap.keys()].sort((a, b) => a - b)
   for (const key of sortedKeys) {
-    toolCalls.push(toolCallMap.get(key)!)
+    const call = toolCallMap.get(key)!
+    if (!call.name) continue
+    toolCalls.push({
+      ...call,
+      id: call.id || `tool_${streamMsgId}_${key}`,
+    })
   }
 
   return { content, toolCalls }

@@ -23347,6 +23347,7 @@ var SCENE_MODIFYING_TOOLS = /* @__PURE__ */ new Set([
   "place_furniture",
   "place_in_room",
   "place_against_wall",
+  "place_furniture_solved",
   "furnish_room",
   "move_nodes",
   "modify_node",
@@ -23369,6 +23370,7 @@ var POST_LAYOUT_TOOLS = /* @__PURE__ */ new Set([
   "place_furniture",
   "place_in_room",
   "place_against_wall",
+  "place_furniture_solved",
   "furnish_room",
   "place_wall_item",
   "place_ceiling_item",
@@ -23435,10 +23437,10 @@ function resolveAgentRunPolicy(userContent, lastValidation = null) {
   } else if (isResidential || isComplex) {
     phase = "openings";
   }
-  const repairTools = ["modify_node", "move_nodes", "batch_modify_nodes", "add_door_to_wall", "add_window_to_wall", "auto_align_windows", "delete_node", "validate_scene"];
+  const repairTools = ["modify_node", "move_nodes", "batch_modify_nodes", "add_door_to_wall", "add_window_to_wall", "auto_align_windows", "suggest_furniture_layout", "place_furniture_solved", "delete_node", "validate_scene"];
   const layoutTools = ["create_room", "create_apartment", "create_polygon_room", "create_l_shaped_room", "create_hallway", "create_walls", "create_slab", "create_zone", "validate_scene"];
   const openingTools = ["create_door", "create_window", "add_door_to_wall", "add_window_to_wall", "auto_align_windows", "create_zone", "validate_scene"];
-  const furnishingTools = ["place_furniture", "place_in_room", "place_against_wall", "furnish_room", "place_wall_item", "place_ceiling_item", "validate_scene"];
+  const furnishingTools = ["suggest_furniture_layout", "place_furniture_solved", "furnish_room", "place_in_room", "place_against_wall", "place_furniture", "place_wall_item", "place_ceiling_item", "validate_scene"];
   const roofTools = ["create_roof", "create_ceiling", "place_wall_item", "place_ceiling_item", "validate_scene"];
   const allowedNextTools = phase === "validation_repair" ? repairTools : phase === "furnishing" ? furnishingTools : phase === "roof_detail" ? roofTools : phase === "openings" ? [...openingTools, ...layoutTools] : layoutTools;
   return {
@@ -23618,9 +23620,30 @@ ${sceneContext}`;
       let hasSceneModification = false;
       let sceneModificationCount = 0;
       for (const tc of toolCalls) {
-        const toolArgs = JSON.parse(tc.arguments);
         const isSceneModifyingTool = SCENE_MODIFYING_TOOLS.has(tc.name);
         let result;
+        let toolArgs = {};
+        try {
+          toolArgs = tc.arguments.trim() ? JSON.parse(tc.arguments) : {};
+        } catch (err) {
+          result = JSON.stringify({
+            error: "Invalid tool arguments JSON",
+            tool: tc.name,
+            arguments: tc.arguments,
+            message: err instanceof Error ? err.message : String(err),
+            nextAction: "Call the same tool again with complete valid JSON arguments that match the tool schema."
+          });
+          const toolMsg2 = {
+            id: genId(),
+            role: "tool",
+            content: result,
+            toolCallId: tc.id
+          };
+          set2((s) => ({
+            messages: [...s.messages, toolMsg2]
+          }));
+          continue;
+        }
         const stagedDeferral = isSceneModifyingTool ? stagedDeferralForTool(tc.name, userContent, lastValidation, runPolicy) : null;
         if (stagedDeferral) {
           result = JSON.stringify(stagedDeferral);
@@ -23677,7 +23700,17 @@ ${sceneContext}`;
     });
     return;
   }
-  set2({ isLoading: false });
+  set2((s) => ({
+    messages: [
+      ...s.messages,
+      {
+        id: genId(),
+        role: "assistant",
+        content: "\u5DE5\u5177\u8C03\u7528\u5DF2\u8FBE\u5230\u672C\u8F6E\u6700\u5927\u8FED\u4EE3\u6B21\u6570\u3002\u5F53\u524D\u573A\u666F\u5DF2\u4FDD\u7559\uFF0C\u5EFA\u8BAE\u5148\u67E5\u770B\u6700\u8FD1\u4E00\u6B21 validation/tool result\uFF0C\u518D\u7EE7\u7EED\u4E0B\u4E00\u6B65\u4FEE\u590D\u6216\u751F\u6210\u3002"
+      }
+    ],
+    isLoading: false
+  }));
 }
 async function parseStreamResponse(res, get, set2) {
   const reader = res.body.getReader();
@@ -23747,7 +23780,12 @@ async function parseStreamResponse(res, get, set2) {
   const toolCalls = [];
   const sortedKeys = [...toolCallMap.keys()].sort((a, b) => a - b);
   for (const key of sortedKeys) {
-    toolCalls.push(toolCallMap.get(key));
+    const call = toolCallMap.get(key);
+    if (!call.name) continue;
+    toolCalls.push({
+      ...call,
+      id: call.id || `tool_${streamMsgId}_${key}`
+    });
   }
   return { content, toolCalls };
 }

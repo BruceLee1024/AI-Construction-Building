@@ -21,7 +21,7 @@
     { "type": "validation.repairHints", "mustIncludeRuleIds": ["room.main_space_daylight"], "mustIncludePreferredTools": ["add_window_to_wall"] },
     {
       "type": "agent.deferral",
-      "toolName": "place_furniture",
+      "toolName": "place_furniture_solved",
       "userContent": "创建一个符合中国住宅规则的卧室并摆放家具",
       "lastValidation": {
         "valid": false,
@@ -49,7 +49,7 @@
       },
       "deferred": true,
       "phaseBlockedBy": "validation_repair",
-      "mustIncludeAllowedTools": ["add_window_to_wall", "modify_node"],
+      "mustIncludeAllowedTools": ["add_window_to_wall", "modify_node", "suggest_furniture_layout"],
       "mustIncludeRuleIds": ["room.main_space_daylight"]
     }
   ]
