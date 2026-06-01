@@ -1,0 +1,155 @@
+{
+  "name": "agent-tool-contract-readiness",
+  "description": "Tool contracts and readiness diagnostics expose prerequisites, candidate refs, retry hints, and traceable failure shapes.",
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": {
+        "width": 4.8,
+        "depth": 3.6,
+        "addDoor": true,
+        "addWindows": true
+      }
+    },
+    {
+      "tool": "agent.tool_readiness",
+      "args": {
+        "toolName": "place_furniture_solved",
+        "userContent": "给卧室摆放床和衣柜",
+        "sceneContext": {
+          "fromStep": 0,
+          "path": "$"
+        },
+        "toolArgs": {
+          "roomType": "bedroom"
+        }
+      }
+    },
+    {
+      "tool": "agent.tool_readiness",
+      "args": {
+        "toolName": "add_window_to_wall",
+        "userContent": "继续优化开窗",
+        "sceneContext": {
+          "fromStep": 0,
+          "path": "$"
+        },
+        "toolArgs": {
+          "width": 1.5
+        }
+      }
+    },
+    {
+      "tool": "agent.invalid_json",
+      "args": {
+        "toolName": "place_furniture_solved",
+        "userContent": "给卧室摆放家具",
+        "arguments": "{ roomType: bedroom",
+        "sceneContext": {
+          "fromStep": 0,
+          "path": "$"
+        }
+      }
+    }
+  ],
+  "assertions": [
+    {
+      "type": "agent.toolContract",
+      "toolName": "place_furniture_solved",
+      "phases": [
+        "furnishing",
+        "validation_repair"
+      ],
+      "modifiesScene": true,
+      "requiresLayout": true,
+      "requiresSlabId": true,
+      "requiresNonBlockingValidation": true
+    },
+    {
+      "type": "agent.toolContract",
+      "toolName": "place_furniture",
+      "phases": [
+        "furnishing"
+      ],
+      "modifiesScene": true,
+      "fallbackOnly": true,
+      "requiresNonBlockingValidation": true
+    },
+    {
+      "type": "toolResult.failureShape",
+      "step": 1,
+      "failureKind": "missing_scene_prerequisite",
+      "mustIncludeFields": [
+        "missingInputs",
+        "candidateRefs",
+        "recommendedNextTool",
+        "retryArgsHint"
+      ]
+    },
+    {
+      "type": "toolResult.candidateRefs",
+      "step": 1,
+      "mustInclude": [
+        "slabs"
+      ]
+    },
+    {
+      "type": "toolResult.field",
+      "step": 1,
+      "path": "retryArgsHint.slabId",
+      "expected": {
+        "exists": true
+      }
+    },
+    {
+      "type": "toolResult.failureShape",
+      "step": 2,
+      "failureKind": "missing_scene_prerequisite",
+      "mustIncludeFields": [
+        "missingInputs",
+        "candidateRefs",
+        "recommendedNextTool",
+        "retryArgsHint"
+      ]
+    },
+    {
+      "type": "toolResult.candidateRefs",
+      "step": 2,
+      "mustInclude": [
+        "walls"
+      ]
+    },
+    {
+      "type": "toolResult.field",
+      "step": 2,
+      "path": "retryArgsHint.wallId",
+      "expected": {
+        "exists": true
+      }
+    },
+    {
+      "type": "toolResult.failureShape",
+      "step": 3,
+      "failureKind": "invalid_json",
+      "mustIncludeFields": [
+        "recommendedNextTool",
+        "retryArgsHint",
+        "agentTrace"
+      ]
+    },
+    {
+      "type": "agent.trace",
+      "step": 3,
+      "phase": "furnishing",
+      "gateDecision": "invalid_json",
+      "toolCall": "place_furniture_solved",
+      "mustIncludeExposed": [
+        "place_furniture_solved",
+        "suggest_furniture_layout"
+      ],
+      "mustIncludeHidden": [
+        "create_roof"
+      ]
+    }
+  ]
+}

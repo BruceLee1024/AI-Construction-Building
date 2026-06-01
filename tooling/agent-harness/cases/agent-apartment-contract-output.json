@@ -1,0 +1,22 @@
+{
+  "name": "agent-apartment-contract-output",
+  "description": "create_apartment returns contract-friendly candidate refs and next-action fields for staged agent calls.",
+  "steps": [
+    {
+      "tool": "create_apartment",
+      "args": {
+        "rooms": [
+          { "name": "客厅", "roomType": "living", "width": 4.5, "depth": 4, "hasDoor": true, "hasWindow": true },
+          { "name": "卧室", "roomType": "bedroom", "width": 3.6, "depth": 3.4, "hasDoor": true, "hasWindow": true }
+        ]
+      }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 0, "expected": true },
+    { "type": "toolResult.field", "step": 0, "path": "tool", "expected": "create_apartment" },
+    { "type": "toolResult.field", "step": 0, "path": "sceneDelta.createdCount", "expected": { "exists": true } },
+    { "type": "toolResult.candidateRefs", "step": 0, "mustInclude": ["slabs", "walls"] },
+    { "type": "toolResult.includesSuggestions", "step": 0, "tools": ["validate_scene", "add_window_to_wall", "place_furniture_solved"] }
+  ]
+}

@@ -18344,6 +18344,14 @@ function createdByType(entries) {
     Object.entries(entries).map(([type, values]) => [type, compactIds(values)]).filter(([, ids]) => ids.length > 0)
   );
 }
+function sceneDelta(createdNodeIds = [], modifiedNodeIds = []) {
+  return {
+    createdNodeIds,
+    modifiedNodeIds,
+    createdCount: createdNodeIds.length,
+    modifiedCount: modifiedNodeIds.length
+  };
+}
 function polygonBounds2(polygon) {
   const xs = polygon.map((p) => p[0]);
   const zs = polygon.map((p) => p[1]);
@@ -18689,20 +18697,31 @@ function createRoom(args) {
   };
   const results = {
     success: true,
+    tool: "create_room",
     walls: wallResult,
     slab: slabResult,
     createdNodeIds: compactIds([
       ...Array.isArray(wallResult.wallIds) ? wallResult.wallIds : [],
       slabResult.slabId
     ]),
+    modifiedNodeIds: [],
     createdByType: createdByType({
       wall: Array.isArray(wallResult.wallIds) ? wallResult.wallIds : [],
       slab: [slabResult.slabId]
     }),
+    sceneDelta: sceneDelta(compactIds([
+      ...Array.isArray(wallResult.wallIds) ? wallResult.wallIds : [],
+      slabResult.slabId
+    ])),
     spatialContext,
     usableBounds: spatialContext.interiorBounds,
     candidateWalls: spatialContext.wallsByFace,
-    suggestedNextTools: ["create_zone", "add_door_to_wall", "add_window_to_wall", "validate_scene"]
+    candidateRefs: {
+      slabs: [{ id: slabResult.slabId, slabId: slabResult.slabId, bounds: polygonBounds2(slabPolygon), area: polygonArea2(slabPolygon) }],
+      walls: Object.values(spatialContext.wallsByFace)
+    },
+    suggestedNextTools: ["create_zone", "add_door_to_wall", "add_window_to_wall", "validate_scene"],
+    nextAction: "Add semantic zone and openings, then validate before furnishing."
   };
   if (addDoor) {
     const wallIndexMap = {
@@ -18723,6 +18742,7 @@ function createRoom(args) {
       ...results.createdByType,
       door: compactIds([doorResult.doorId])
     };
+    results.sceneDelta = sceneDelta(results.createdNodeIds);
   }
   if (addWindows) {
     const doorWallIndex = { front: 0, right: 1, back: 2, left: 3 }[doorWall] ?? 0;
@@ -18743,6 +18763,7 @@ function createRoom(args) {
       ...results.createdByType,
       window: compactIds(windowResults.map((result) => isRecordLike(result) ? result.windowId : void 0))
     };
+    results.sceneDelta = sceneDelta(results.createdNodeIds);
   }
   if (addCeiling) {
     const ceilingPolygon = [
@@ -18760,6 +18781,7 @@ function createRoom(args) {
       ...results.createdByType,
       ceiling: compactIds([ceilingResult.ceilingId])
     };
+    results.sceneDelta = sceneDelta(results.createdNodeIds);
   }
   return JSON.stringify(results);
 }
@@ -18799,11 +18821,14 @@ function createZone(args) {
   use_scene_default.getState().createNode(zone, levelId);
   return JSON.stringify({
     success: true,
+    tool: "create_zone",
     zoneId: zone.id,
     name,
     ...roomType ? { roomType } : {},
     createdNodeIds: [zone.id],
+    modifiedNodeIds: [],
     createdByType: { zone: [zone.id] },
+    sceneDelta: sceneDelta([zone.id]),
     spatialContext: {
       polygon,
       bounds: polygonBounds2(polygon),
@@ -18811,7 +18836,11 @@ function createZone(args) {
       roomType: roomType ?? null
     },
     usableBounds: polygonBounds2(polygon),
-    suggestedNextTools: ["validate_scene", "add_door_to_wall", "add_window_to_wall"]
+    candidateRefs: {
+      nodes: [{ id: zone.id, type: "zone", name, roomType: roomType ?? null }]
+    },
+    suggestedNextTools: ["validate_scene", "add_door_to_wall", "add_window_to_wall"],
+    nextAction: "Validate semantic room rules, then add required doors/windows if missing."
   });
 }
 function createRoof(args) {
@@ -18920,16 +18949,37 @@ function createApartment(args) {
   }
   return JSON.stringify({
     success: true,
+    tool: "create_apartment",
     roomCount: rooms.length,
     rooms: results,
     createdNodeIds: allCreatedIds,
+    modifiedNodeIds: [],
     createdByType: allByType,
+    sceneDelta: sceneDelta(allCreatedIds),
     spatialContext: {
       origin,
       maxRowWidth,
       rooms: roomContexts
     },
-    suggestedNextTools: ["validate_scene", "add_window_to_wall", "auto_align_windows", "place_in_room"]
+    candidateRefs: {
+      slabs: roomContexts.filter((room) => typeof room.slabId === "string").map((room) => ({
+        id: room.slabId,
+        slabId: room.slabId,
+        roomType: room.roomType,
+        zoneId: room.zoneId,
+        name: room.name
+      })),
+      walls: roomContexts.flatMap((room) => {
+        const walls = isRecordLike(room.candidateWalls) ? Object.values(room.candidateWalls) : [];
+        return walls.filter(isRecordLike).map((wall) => ({
+          ...wall,
+          roomName: room.name,
+          roomType: room.roomType
+        }));
+      })
+    },
+    suggestedNextTools: ["validate_scene", "add_window_to_wall", "auto_align_windows", "place_furniture_solved"],
+    nextAction: "Run validation with the active codeProfile, then repair openings/daylight before furniture."
   });
 }
 function createLShapedRoom(args) {
@@ -19198,6 +19248,21 @@ function getSceneInfo() {
     exteriorWallCandidates: walls.filter((wall) => Number(wall.length) >= 1.2).slice(0, 12).map((wall) => ({ id: wall.id, length: wall.length, start: wall.start, end: wall.end })),
     suggestedNextTools: roomSummaries.length === 0 ? ["create_room", "create_apartment", "create_polygon_room"] : ["validate_scene", "add_door_to_wall", "add_window_to_wall", "auto_align_windows", "place_in_room"]
   };
+  const agentNextActions = {
+    primary: roomSummaries.length === 0 ? "create_layout" : lastValidationReport && lastValidationReport.blocking ? "repair_validation" : roomSummaries.some((room) => room.doorCount === 0 || windowCountNeedsAttention(room.roomType, room.windowCount)) ? "add_openings" : items.length === 0 ? "solve_furniture" : "validate_scene",
+    alternatives: roomSummaries.length === 0 ? ["create_room", "create_apartment", "create_polygon_room"] : ["validate_scene", "add_door_to_wall", "add_window_to_wall", "suggest_furniture_layout"],
+    blockedBy: lastValidationReport && lastValidationReport.blocking ? {
+      blockingRuleIds: lastValidationReport.blockingRuleIds,
+      repairHints: lastValidationReport.repairHints
+    } : null,
+    candidateArgs: {
+      validate_scene: {},
+      add_window_to_wall: architecturalSummary.exteriorWallCandidates[0] ? { wallId: architecturalSummary.exteriorWallCandidates[0].id, width: 1.5 } : void 0,
+      add_door_to_wall: architecturalSummary.exteriorWallCandidates[0] ? { wallId: architecturalSummary.exteriorWallCandidates[0].id, width: 0.9 } : void 0,
+      suggest_furniture_layout: roomSummaries[0] ? { slabId: roomSummaries[0].slabId, roomType: roomSummaries[0].roomType ?? "living" } : void 0,
+      place_furniture_solved: roomSummaries[0] ? { slabId: roomSummaries[0].slabId, roomType: roomSummaries[0].roomType ?? "living" } : void 0
+    }
+  };
   return JSON.stringify({
     levelId,
     activeLevelName: allLevels.find((l) => l.isActive)?.name ?? "Level 0",
@@ -19215,6 +19280,7 @@ function getSceneInfo() {
     },
     allLevels,
     architecturalSummary,
+    agentNextActions,
     lastValidation: lastValidationReport ? {
       codeProfile: lastValidationReport.codeProfile,
       blocking: lastValidationReport.blocking,
@@ -19392,9 +19458,26 @@ function addDoorToWall(args) {
   use_scene_default.getState().createNode(door, wallId);
   return JSON.stringify({
     success: true,
+    tool: "add_door_to_wall",
     doorId: door.id,
     wallId,
-    wallLength: Math.round(wallLen * 100) / 100
+    wallLength: Math.round(wallLen * 100) / 100,
+    createdNodeIds: [door.id],
+    modifiedNodeIds: [],
+    createdByType: { door: [door.id] },
+    sceneDelta: sceneDelta([door.id]),
+    spatialContext: {
+      wallId,
+      wallLength: Math.round(wallLen * 100) / 100,
+      position_t: t,
+      width: args.width ?? 0.9
+    },
+    candidateRefs: {
+      walls: [{ id: wallId, wallId, length: Math.round(wallLen * 100) / 100 }],
+      nodes: [{ id: door.id, type: "door" }]
+    },
+    suggestedNextTools: ["validate_scene", "add_window_to_wall"],
+    nextAction: "Validate door width/clearance and add windows if daylight or ventilation is missing."
   });
 }
 function addWindowToWall(args) {
@@ -19423,9 +19506,27 @@ function addWindowToWall(args) {
   use_scene_default.getState().createNode(window2, wallId);
   return JSON.stringify({
     success: true,
+    tool: "add_window_to_wall",
     windowId: window2.id,
     wallId,
-    wallLength: Math.round(wallLen * 100) / 100
+    wallLength: Math.round(wallLen * 100) / 100,
+    createdNodeIds: [window2.id],
+    modifiedNodeIds: [],
+    createdByType: { window: [window2.id] },
+    sceneDelta: sceneDelta([window2.id]),
+    spatialContext: {
+      wallId,
+      wallLength: Math.round(wallLen * 100) / 100,
+      position_t: t,
+      width: args.width ?? 1.5,
+      sillHeight
+    },
+    candidateRefs: {
+      walls: [{ id: wallId, wallId, length: Math.round(wallLen * 100) / 100 }],
+      nodes: [{ id: window2.id, type: "window" }]
+    },
+    suggestedNextTools: ["validate_scene", "auto_align_windows"],
+    nextAction: "Validate daylight, ventilation, opening edge clearance, and opening spacing."
   });
 }
 function batchModifyNodes(args) {
@@ -19485,11 +19586,14 @@ function createPolygonRoom(args) {
   const wallResult = JSON.parse(createWalls({ walls: wallDefs }));
   const results = {
     success: true,
+    tool: "create_polygon_room",
     walls: wallResult,
     createdNodeIds: compactIds(Array.isArray(wallResult.wallIds) ? wallResult.wallIds : []),
+    modifiedNodeIds: [],
     createdByType: createdByType({
       wall: Array.isArray(wallResult.wallIds) ? wallResult.wallIds : []
     }),
+    sceneDelta: sceneDelta(compactIds(Array.isArray(wallResult.wallIds) ? wallResult.wallIds : [])),
     spatialContext: {
       polygon,
       bounds: polygonBounds2(polygon),
@@ -19509,7 +19613,20 @@ function createPolygonRoom(args) {
       index,
       wallId: Array.isArray(wallResult.wallIds) ? wallResult.wallIds[index] : void 0
     })),
-    suggestedNextTools: ["create_zone", "add_door_to_wall", "add_window_to_wall", "validate_scene"]
+    candidateRefs: {
+      walls: polygon.map((point, index) => {
+        const next = polygon[(index + 1) % polygon.length];
+        return {
+          id: Array.isArray(wallResult.wallIds) ? wallResult.wallIds[index] : void 0,
+          wallId: Array.isArray(wallResult.wallIds) ? wallResult.wallIds[index] : void 0,
+          start: point,
+          end: next,
+          length: round32(Math.sqrt((next[0] - point[0]) ** 2 + (next[1] - point[1]) ** 2))
+        };
+      })
+    },
+    suggestedNextTools: ["create_zone", "add_door_to_wall", "add_window_to_wall", "validate_scene"],
+    nextAction: "Add a semantic zone, add openings, then validate before furnishing."
   };
   if (addSlab) {
     const slabResult = JSON.parse(createSlab({ polygon }));
@@ -19520,6 +19637,11 @@ function createPolygonRoom(args) {
       slab: compactIds([slabResult.slabId])
     };
     results.usableBounds = polygonBounds2(polygon);
+    results.sceneDelta = sceneDelta(results.createdNodeIds);
+    results.candidateRefs = {
+      ...isRecordLike(results.candidateRefs) ? results.candidateRefs : {},
+      slabs: [{ id: slabResult.slabId, slabId: slabResult.slabId, bounds: polygonBounds2(polygon), area: polygonArea2(polygon) }]
+    };
   }
   if (addDoor && doorEdgeIndex >= 0 && doorEdgeIndex < polygon.length) {
     const doorResult = JSON.parse(
@@ -19531,6 +19653,7 @@ function createPolygonRoom(args) {
       ...results.createdByType,
       door: compactIds([doorResult.doorId])
     };
+    results.sceneDelta = sceneDelta(results.createdNodeIds);
   }
   if (zoneName) {
     const zoneResult = JSON.parse(
@@ -19542,6 +19665,7 @@ function createPolygonRoom(args) {
       ...results.createdByType,
       zone: compactIds([zoneResult.zoneId])
     };
+    results.sceneDelta = sceneDelta(results.createdNodeIds);
   }
   return JSON.stringify(results);
 }
@@ -20032,7 +20156,15 @@ function missingCriticalFurniture(roomType, requested, placements, substitutions
 }
 function suggestFurnitureLayout(args) {
   const result = solveFurnitureLayout(args);
-  return JSON.stringify(result);
+  return JSON.stringify({
+    ...result,
+    tool: "suggest_furniture_layout",
+    createdNodeIds: [],
+    modifiedNodeIds: [],
+    sceneDelta: sceneDelta(),
+    candidateRefs: result.slabId ? { slabs: [{ id: result.slabId, slabId: result.slabId, roomType: result.roomType, bounds: result.roomBounds }] } : {},
+    nextAction: result.recommendedNextAction
+  });
 }
 function placeFurnitureSolved(args) {
   const solve = solveFurnitureLayout(args);
@@ -20054,11 +20186,16 @@ function placeFurnitureSolved(args) {
   }
   return JSON.stringify({
     ...solve,
+    tool: "place_furniture_solved",
     success: created.length > 0,
     created,
     createdNodeIds: compactIds(created.map((result) => isRecordLike(result) ? result.itemId : void 0)),
+    modifiedNodeIds: [],
     createdByType: { item: compactIds(created.map((result) => isRecordLike(result) ? result.itemId : void 0)) },
-    suggestedNextTools: ["validate_scene", "suggest_furniture_layout"]
+    sceneDelta: sceneDelta(compactIds(created.map((result) => isRecordLike(result) ? result.itemId : void 0))),
+    candidateRefs: solve.slabId ? { slabs: [{ id: solve.slabId, slabId: solve.slabId, roomType: solve.roomType, bounds: solve.roomBounds }] } : {},
+    suggestedNextTools: ["validate_scene", "suggest_furniture_layout"],
+    nextAction: "Validate furniture bounds, clearance, collisions, and relationship rules."
   });
 }
 function placeFurniture(args) {
@@ -20132,6 +20269,7 @@ function placeFurniture(args) {
   if (collisions.length > 0) warnings.push(`\u26A0\uFE0F Overlaps with ${collisions.length} item(s): ${collisions.map((c) => c.name).join(", ")}`);
   return JSON.stringify({
     success: true,
+    tool: "place_furniture",
     itemId: item.id,
     name: catalogEntry.name,
     catalogId: catalogEntry.id,
@@ -20142,14 +20280,21 @@ function placeFurniture(args) {
     collisions: collisions.length > 0 ? collisions : void 0,
     warning: warnings.length > 0 ? warnings.join(" | ") : void 0,
     createdNodeIds: [item.id],
+    modifiedNodeIds: [],
     createdByType: { item: [item.id] },
+    sceneDelta: sceneDelta([item.id]),
     spatialContext: {
       bbox,
       insideSlabId: insideRoom,
       collisions
     },
     usableBounds: bbox,
-    suggestedNextTools: warnings.length > 0 ? ["move_nodes", "validate_scene"] : ["validate_scene", "place_in_room", "place_against_wall"]
+    candidateRefs: {
+      nodes: [{ id: item.id, type: "item", catalogId: catalogEntry.id }],
+      ...insideRoom ? { slabs: [{ id: insideRoom, slabId: insideRoom }] } : {}
+    },
+    suggestedNextTools: warnings.length > 0 ? ["move_nodes", "validate_scene"] : ["validate_scene", "place_in_room", "place_against_wall"],
+    nextAction: warnings.length > 0 ? "Use solver or move_nodes to repair placement, then validate." : "Validate furniture spatial constraints."
   });
 }
 function pointInPolygonSimple(x, z2, polygon) {
@@ -20262,18 +20407,26 @@ function placeInRoom(args) {
       }));
       return JSON.stringify({
         ...result,
+        tool: "place_in_room",
         solverAdjusted: solved.placement.position[0] !== targetPosition[0] || solved.placement.position[2] !== targetPosition[2] || solved.placement.rotation !== rotDeg,
         requestedPosition: targetPosition,
         solverPlacement: solved.placement,
-        rejections: solved.rejections.slice(0, 5)
+        rejections: solved.rejections.slice(0, 5),
+        nextAction: "Validate furniture spatial constraints after semantic placement."
       });
     }
     return JSON.stringify({
       success: false,
+      tool: "place_in_room",
+      failureKind: "missing_scene_prerequisite",
       error: "Requested semantic furniture position is not feasible",
       requestedPosition: targetPosition,
       rejections: solved.rejections.slice(0, 8),
-      suggestedNextTools: ["suggest_furniture_layout", "place_furniture_solved"]
+      candidateRefs: room.slabId ? { slabs: [{ id: room.slabId, slabId: room.slabId, bounds: room.bounds }] } : {},
+      recommendedNextTool: "suggest_furniture_layout",
+      retryArgsHint: { roomType: String(args.roomType ?? "living"), ...room.slabId ? { slabId: room.slabId } : {} },
+      suggestedNextTools: ["suggest_furniture_layout", "place_furniture_solved"],
+      nextAction: "Preview a solved layout or reduce furniture requirements before creating nodes."
     });
   }
   return placeFurniture({
@@ -20347,18 +20500,26 @@ function placeAgainstWall(args) {
       }));
       return JSON.stringify({
         ...result,
+        tool: "place_against_wall",
         solverAdjusted: solved.placement.position[0] !== targetPosition[0] || solved.placement.position[2] !== targetPosition[2] || solved.placement.rotation !== Math.round(rotDeg),
         requestedPosition: targetPosition,
         solverPlacement: solved.placement,
-        rejections: solved.rejections.slice(0, 5)
+        rejections: solved.rejections.slice(0, 5),
+        nextAction: "Validate furniture spatial constraints after wall-backed placement."
       });
     }
     return JSON.stringify({
       success: false,
+      tool: "place_against_wall",
+      failureKind: "missing_scene_prerequisite",
       error: "Requested wall furniture position is not feasible",
       requestedPosition: targetPosition,
       rejections: solved.rejections.slice(0, 8),
-      suggestedNextTools: ["suggest_furniture_layout", "place_furniture_solved"]
+      candidateRefs: { walls: [{ id: wallId, wallId, length: round32(wallLen) }], ...room.slabId ? { slabs: [{ id: room.slabId, slabId: room.slabId, bounds: room.bounds }] } : {} },
+      recommendedNextTool: "suggest_furniture_layout",
+      retryArgsHint: { roomType: String(args.roomType ?? "living"), ...room.slabId ? { slabId: room.slabId } : {} },
+      suggestedNextTools: ["suggest_furniture_layout", "place_furniture_solved"],
+      nextAction: "Preview a solved layout or choose another wall/candidate before creating nodes."
     });
   }
   return placeFurniture({ type: itemType, position: targetPosition, rotation: Math.round(rotDeg) });
@@ -23386,6 +23547,260 @@ var POST_LAYOUT_TOOLS = /* @__PURE__ */ new Set([
   "place_ceiling_item",
   "create_furnished_apartment"
 ]);
+var AGENT_TOOL_CONTRACTS = {
+  get_scene_info: {
+    name: "get_scene_info",
+    phases: ["diagnostic"],
+    recoveryAction: "Inspect current scene progress, candidate slab IDs, candidate wall IDs, and last validation."
+  },
+  validate_scene: {
+    name: "validate_scene",
+    phases: ["diagnostic", "layout", "openings", "validation_repair", "furnishing", "roof_detail"],
+    recoveryAction: "Run validation with the current codeProfile before moving to post-layout work."
+  },
+  create_room: {
+    name: "create_room",
+    phases: ["layout"],
+    modifiesScene: true,
+    recoveryAction: "Create a bounded room first, then add zone, openings, validation, and furniture."
+  },
+  create_apartment: {
+    name: "create_apartment",
+    phases: ["layout"],
+    modifiesScene: true,
+    highRisk: true,
+    recoveryAction: "Use for staged apartment layout only; validate before adding furniture or roof details."
+  },
+  create_polygon_room: {
+    name: "create_polygon_room",
+    phases: ["layout"],
+    modifiesScene: true,
+    recoveryAction: "Use when room geometry is non-rectangular; validate closure and openings after creation."
+  },
+  create_l_shaped_room: {
+    name: "create_l_shaped_room",
+    phases: ["layout"],
+    modifiesScene: true,
+    recoveryAction: "Use for L-shaped layout, then validate slab/wall closure."
+  },
+  create_hallway: {
+    name: "create_hallway",
+    phases: ["layout"],
+    modifiesScene: true,
+    recoveryAction: "Use for corridor geometry, then validate corridor width."
+  },
+  create_walls: {
+    name: "create_walls",
+    phases: ["layout"],
+    modifiesScene: true,
+    recoveryAction: "Create closed wall loops; add slab/zone after wall creation."
+  },
+  create_slab: {
+    name: "create_slab",
+    phases: ["layout"],
+    modifiesScene: true,
+    recoveryAction: "Create floor slab for an existing room boundary."
+  },
+  create_zone: {
+    name: "create_zone",
+    phases: ["layout", "openings"],
+    modifiesScene: true,
+    requiresLayout: true,
+    recoveryAction: "Attach semantic roomType to a slab polygon so validation can apply room-specific rules."
+  },
+  create_door: {
+    name: "create_door",
+    phases: ["openings"],
+    modifiesScene: true,
+    requiresLayout: true,
+    recoveryAction: "Prefer add_door_to_wall when specific wall IDs are available."
+  },
+  create_window: {
+    name: "create_window",
+    phases: ["openings"],
+    modifiesScene: true,
+    requiresLayout: true,
+    recoveryAction: "Prefer add_window_to_wall or auto_align_windows when specific wall IDs are available."
+  },
+  add_door_to_wall: {
+    name: "add_door_to_wall",
+    phases: ["openings", "validation_repair"],
+    modifiesScene: true,
+    requiresLayout: true,
+    requiresWallId: true,
+    recoveryAction: "Use candidate wall IDs from get_scene_info.architecturalSummary.exteriorWallCandidates."
+  },
+  add_window_to_wall: {
+    name: "add_window_to_wall",
+    phases: ["openings", "validation_repair"],
+    modifiesScene: true,
+    requiresLayout: true,
+    requiresWallId: true,
+    recoveryAction: "Use candidate exterior wall IDs from get_scene_info before adding windows."
+  },
+  auto_align_windows: {
+    name: "auto_align_windows",
+    phases: ["openings", "validation_repair"],
+    modifiesScene: true,
+    requiresLayout: true,
+    requiresWallId: true,
+    recoveryAction: "Use wallIds from exterior wall candidates when daylight or ventilation is missing."
+  },
+  modify_node: {
+    name: "modify_node",
+    phases: ["validation_repair"],
+    modifiesScene: true,
+    requiresNodeId: true,
+    recoveryAction: "Use nodeId from repairHints or candidateRefs."
+  },
+  move_nodes: {
+    name: "move_nodes",
+    phases: ["validation_repair"],
+    modifiesScene: true,
+    requiresNodeId: true,
+    recoveryAction: "Move problematic nodes from repairHints; validate again after moving."
+  },
+  batch_modify_nodes: {
+    name: "batch_modify_nodes",
+    phases: ["validation_repair"],
+    modifiesScene: true,
+    requiresNodeId: true,
+    recoveryAction: "Batch update IDs from repairHints only when all IDs are known."
+  },
+  delete_node: {
+    name: "delete_node",
+    phases: ["validation_repair"],
+    modifiesScene: true,
+    requiresNodeId: true,
+    recoveryAction: "Delete only a known problematic node from repairHints/candidateRefs."
+  },
+  suggest_furniture_layout: {
+    name: "suggest_furniture_layout",
+    phases: ["furnishing", "validation_repair"],
+    requiresLayout: true,
+    requiresSlabId: true,
+    requiresNonBlockingValidation: true,
+    recommendedTool: "place_furniture_solved",
+    recoveryAction: "Preview solved furniture placement for a slab before creating nodes."
+  },
+  place_furniture_solved: {
+    name: "place_furniture_solved",
+    phases: ["furnishing", "validation_repair"],
+    modifiesScene: true,
+    requiresLayout: true,
+    requiresSlabId: true,
+    requiresNonBlockingValidation: true,
+    recommendedTool: "suggest_furniture_layout",
+    recoveryAction: "Use solver with slabId; it avoids doors, windows, collisions, and main paths."
+  },
+  furnish_room: {
+    name: "furnish_room",
+    phases: ["furnishing"],
+    modifiesScene: true,
+    requiresLayout: true,
+    requiresSlabId: true,
+    requiresNonBlockingValidation: true,
+    recommendedTool: "place_furniture_solved",
+    recoveryAction: "Prefer place_furniture_solved for deterministic layout; furnish_room remains semantic convenience."
+  },
+  place_in_room: {
+    name: "place_in_room",
+    phases: ["furnishing"],
+    modifiesScene: true,
+    requiresLayout: true,
+    requiresSlabId: true,
+    requiresNonBlockingValidation: true,
+    recommendedTool: "place_furniture_solved",
+    recoveryAction: "Use only for a single semantic placement after slabId is known."
+  },
+  place_against_wall: {
+    name: "place_against_wall",
+    phases: ["furnishing"],
+    modifiesScene: true,
+    requiresLayout: true,
+    requiresWallId: true,
+    requiresNonBlockingValidation: true,
+    recommendedTool: "place_furniture_solved",
+    recoveryAction: "Use only for single wall-backed item placement with a known wallId."
+  },
+  place_furniture: {
+    name: "place_furniture",
+    phases: ["furnishing"],
+    modifiesScene: true,
+    fallbackOnly: true,
+    requiresNonBlockingValidation: true,
+    recommendedTool: "place_furniture_solved",
+    recoveryAction: "Raw coordinate fallback only; use solver unless user provided exact coordinates/debug request."
+  },
+  place_wall_item: {
+    name: "place_wall_item",
+    phases: ["furnishing", "roof_detail"],
+    modifiesScene: true,
+    requiresLayout: true,
+    requiresWallId: true,
+    requiresNonBlockingValidation: true,
+    recoveryAction: "Use after layout/openings validation passes and wallId is known."
+  },
+  place_ceiling_item: {
+    name: "place_ceiling_item",
+    phases: ["furnishing", "roof_detail"],
+    modifiesScene: true,
+    requiresLayout: true,
+    requiresNonBlockingValidation: true,
+    recoveryAction: "Use after validated layout, usually for lights or ceiling-mounted assets."
+  },
+  create_roof: {
+    name: "create_roof",
+    phases: ["roof_detail"],
+    modifiesScene: true,
+    requiresLayout: true,
+    requiresNonBlockingValidation: true,
+    recoveryAction: "Only add roof after layout/openings validation is non-blocking."
+  },
+  create_ceiling: {
+    name: "create_ceiling",
+    phases: ["roof_detail"],
+    modifiesScene: true,
+    requiresLayout: true,
+    requiresNonBlockingValidation: true,
+    recoveryAction: "Create ceiling after validated room polygon exists."
+  },
+  create_building_shell: {
+    name: "create_building_shell",
+    phases: ["layout"],
+    modifiesScene: true,
+    highRisk: true,
+    recoveryAction: "One-shot shell is disabled for complex/code-sensitive requests unless rapid concept is requested."
+  },
+  create_furnished_apartment: {
+    name: "create_furnished_apartment",
+    phases: ["layout"],
+    modifiesScene: true,
+    highRisk: true,
+    fallbackOnly: true,
+    recoveryAction: "Avoid one-shot furnished macro; use staged layout, openings, validation, then solver furnishing."
+  },
+  mirror_room: {
+    name: "mirror_room",
+    phases: ["layout"],
+    modifiesScene: true,
+    requiresLayout: true,
+    recoveryAction: "Mirror existing room only after source layout is valid."
+  },
+  duplicate_level: {
+    name: "duplicate_level",
+    phases: ["layout"],
+    modifiesScene: true,
+    recoveryAction: "Use only when multi-level duplication is requested."
+  },
+  build_staircase: {
+    name: "build_staircase",
+    phases: ["layout"],
+    modifiesScene: true,
+    highRisk: true,
+    recoveryAction: "Use only when start/end level IDs are known."
+  }
+};
 var STORAGE_KEY = "pascal-agent-settings";
 function loadSettings() {
   const defaults = { provider: "deepseek", apiKey: "", model: "", baseURL: "", proxyURL: "" };
@@ -23436,6 +23851,17 @@ function agentToolName(tool) {
 function findAgentTool(toolName) {
   return agentTools.find((tool) => agentToolName(tool) === toolName);
 }
+function getAgentToolContract(toolName) {
+  return AGENT_TOOL_CONTRACTS[toolName] ?? null;
+}
+function listAgentToolContracts() {
+  const names = new Set(agentTools.map(agentToolName).filter((name) => Boolean(name)));
+  return Array.from(names).map((name) => AGENT_TOOL_CONTRACTS[name] ?? {
+    name,
+    phases: ["diagnostic"],
+    recoveryAction: "No explicit contract yet; use only when exposed by policy and schema arguments are complete."
+  });
+}
 function validateToolArguments(toolName, args) {
   const tool = findAgentTool(toolName);
   if (!tool || tool.type !== "function") {
@@ -23445,21 +23871,106 @@ function validateToolArguments(toolName, args) {
   if (!isSchemaObject(parameters)) return { valid: true, errors: [] };
   const errors = [];
   validateSchemaValue(parameters, args, "arguments", errors);
+  validateSceneReferences(toolName, args, errors);
   return {
     valid: errors.length === 0,
     errors,
     required: Array.isArray(parameters.required) ? parameters.required.filter((value) => typeof value === "string") : []
   };
 }
+var TOOL_REFERENCE_RULES = {
+  modify_node: [{ field: "nodeId" }],
+  delete_node: [{ field: "nodeId" }],
+  select_node: [{ field: "nodeId" }],
+  move_nodes: [{ field: "nodeIds", array: true }],
+  batch_modify_nodes: [{ field: "nodeIds", array: true }],
+  add_door_to_wall: [{ field: "wallId", nodeType: "wall" }],
+  add_window_to_wall: [{ field: "wallId", nodeType: "wall" }],
+  auto_align_windows: [{ field: "wallIds", nodeType: "wall", array: true }],
+  place_against_wall: [{ field: "wallId", nodeType: "wall" }],
+  place_wall_item: [{ field: "wallId", nodeType: "wall" }],
+  suggest_furniture_layout: [{ field: "slabId", nodeType: "slab" }],
+  place_furniture_solved: [{ field: "slabId", nodeType: "slab" }],
+  place_in_room: [{ field: "slabId", nodeType: "slab" }],
+  furnish_room: [{ field: "slabId", nodeType: "slab" }],
+  build_staircase: [
+    { field: "startLevelId", nodeType: "level" },
+    { field: "endLevelId", nodeType: "level" }
+  ]
+};
+function validateSceneReferences(toolName, args, errors) {
+  const rules = TOOL_REFERENCE_RULES[toolName];
+  if (!rules) return;
+  const nodes = use_scene_default.getState().nodes;
+  for (const rule of rules) {
+    const raw = args[rule.field];
+    if (raw === void 0 || raw === null || raw === "") continue;
+    const values = rule.array ? Array.isArray(raw) ? raw : [raw] : [raw];
+    for (const value of values) {
+      if (typeof value !== "string") continue;
+      const node = nodes[value];
+      if (!node) {
+        errors.push(`arguments.${rule.field} references missing node ${value}`);
+      } else if (rule.nodeType && node.type !== rule.nodeType) {
+        errors.push(`arguments.${rule.field} expected ${rule.nodeType} node, received ${node.type} (${value})`);
+      }
+    }
+  }
+}
 function buildInvalidToolArgumentsResult(toolName, validation) {
+  const candidateRefs = collectCandidateRefs();
   return {
     success: false,
+    failureKind: classifyArgumentFailure(validation.errors),
     error: "Invalid tool arguments",
     tool: toolName,
     argumentErrors: validation.errors,
     requiredArguments: validation.required ?? [],
+    missingInputs: missingInputsForErrors(validation.errors),
+    candidateRefs,
+    recommendedNextTool: recommendedNextToolForInvalidArgs(toolName, validation.errors),
+    retryArgsHint: retryArgsHintForTool(toolName, candidateRefs),
     nextAction: "Retry the same exposed tool with complete arguments that match its schema, or call get_scene_info if required IDs are missing."
   };
+}
+function classifyArgumentFailure(errors) {
+  if (errors.some((error48) => /arguments\.(slabId|wallId|wallIds|nodeId|nodeIds).*(is required|references missing node|expected .* node)/.test(error48))) {
+    return /references missing node|expected .* node/.test(errors.join("\n")) ? "reference" : "missing_scene_prerequisite";
+  }
+  return errors.some((error48) => /references missing node|expected .* node/.test(error48)) ? "reference" : "schema";
+}
+function missingInputsForErrors(errors) {
+  const missing = /* @__PURE__ */ new Set();
+  for (const error48 of errors) {
+    const match = error48.match(/arguments\.([A-Za-z0-9_]+)/);
+    if (match?.[1]) missing.add(match[1]);
+  }
+  return Array.from(missing);
+}
+function recommendedNextToolForInvalidArgs(toolName, errors) {
+  const contract = getAgentToolContract(toolName);
+  if (errors.some((error48) => /wallId|wallIds/.test(error48))) return "get_scene_info";
+  if (errors.some((error48) => /slabId/.test(error48))) return "get_scene_info";
+  if (contract?.recommendedTool) return contract.recommendedTool;
+  return toolName;
+}
+function retryArgsHintForTool(toolName, candidateRefs) {
+  const hint = {};
+  const contract = getAgentToolContract(toolName);
+  if (contract?.requiresSlabId && candidateRefs.slabs?.[0]?.slabId) hint.slabId = candidateRefs.slabs[0].slabId;
+  if (contract?.requiresWallId && candidateRefs.walls?.[0]?.wallId) {
+    if (toolName === "auto_align_windows") hint.wallIds = candidateRefs.walls.slice(0, 3).map((wall) => wall.wallId);
+    else hint.wallId = candidateRefs.walls[0].wallId;
+  }
+  if (contract?.requiresNodeId && candidateRefs.nodes?.[0]?.id) {
+    if (toolName === "move_nodes" || toolName === "batch_modify_nodes") hint.nodeIds = [candidateRefs.nodes[0].id];
+    else hint.nodeId = candidateRefs.nodes[0].id;
+  }
+  if ((toolName === "suggest_furniture_layout" || toolName === "place_furniture_solved") && !hint.roomType) {
+    const roomType = candidateRefs.slabs?.find((slab) => typeof slab.roomType === "string")?.roomType;
+    hint.roomType = roomType ?? "living";
+  }
+  return hint;
 }
 function isSchemaObject(value) {
   return Boolean(value && typeof value === "object");
@@ -23507,13 +24018,91 @@ function matchesJsonSchemaType(type, value) {
 function isPlainObject2(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
-function parseAgentSceneProgress(sceneContextRaw) {
+function parseSceneContext(sceneContextRaw) {
   if (!sceneContextRaw) return null;
   try {
     const parsed = JSON.parse(sceneContextRaw);
+    return isPlainObject2(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function getSceneContextSnapshot() {
+  try {
+    return parseSceneContext(executeToolCall("get_scene_info", {}));
+  } catch {
+    return null;
+  }
+}
+function collectCandidateRefs(sceneContext = getSceneContextSnapshot()) {
+  const refs = {};
+  const architecturalSummary = isPlainObject2(sceneContext?.architecturalSummary) ? sceneContext.architecturalSummary : {};
+  const spaces = Array.isArray(architecturalSummary.spaces) ? architecturalSummary.spaces : [];
+  const roomSummaries = Array.isArray(sceneContext?.roomSummaries) ? sceneContext.roomSummaries : [];
+  const slabDetails = Array.isArray(sceneContext?.slabDetails) ? sceneContext.slabDetails : [];
+  const wallDetails = Array.isArray(sceneContext?.wallDetails) ? sceneContext.wallDetails : [];
+  const exteriorWallCandidates = Array.isArray(architecturalSummary.exteriorWallCandidates) ? architecturalSummary.exteriorWallCandidates : [];
+  const slabCandidates = /* @__PURE__ */ new Map();
+  for (const value of [...spaces, ...roomSummaries, ...slabDetails]) {
+    if (!isPlainObject2(value)) continue;
+    const slabId = typeof value.slabId === "string" ? value.slabId : typeof value.id === "string" ? value.id : null;
+    if (!slabId) continue;
+    slabCandidates.set(slabId, {
+      id: slabId,
+      slabId,
+      roomType: typeof value.roomType === "string" ? value.roomType : void 0,
+      zoneName: typeof value.zoneName === "string" ? value.zoneName : void 0,
+      area: typeof value.area === "number" ? value.area : void 0,
+      bounds: isPlainObject2(value.bounds) ? value.bounds : void 0
+    });
+  }
+  if (slabCandidates.size > 0) refs.slabs = Array.from(slabCandidates.values()).slice(0, 8);
+  const wallCandidates = /* @__PURE__ */ new Map();
+  for (const value of [...exteriorWallCandidates, ...wallDetails]) {
+    if (!isPlainObject2(value)) continue;
+    const id = typeof value.id === "string" ? value.id : typeof value.wallId === "string" ? value.wallId : null;
+    if (!id) continue;
+    wallCandidates.set(id, {
+      id,
+      wallId: id,
+      length: typeof value.length === "number" ? value.length : void 0,
+      start: Array.isArray(value.start) ? value.start : void 0,
+      end: Array.isArray(value.end) ? value.end : void 0,
+      suitableForOpening: typeof value.length === "number" ? value.length >= 1.2 : void 0
+    });
+  }
+  if (wallCandidates.size > 0) refs.walls = Array.from(wallCandidates.values()).slice(0, 12);
+  const nodes = use_scene_default.getState().nodes;
+  refs.nodes = Object.values(nodes).filter((node) => isPlainObject2(node)).slice(0, 16).map((node) => ({
+    id: String(node.id ?? ""),
+    type: String(node.type ?? ""),
+    name: typeof node.name === "string" ? node.name : void 0
+  })).filter((node) => node.id);
+  return refs;
+}
+function hasCandidateRefs(refs) {
+  return Boolean((refs?.slabs?.length ?? 0) > 0 || (refs?.walls?.length ?? 0) > 0 || (refs?.nodes?.length ?? 0) > 0);
+}
+function parseAgentSceneProgress(sceneContextRaw) {
+  const parsed = parseSceneContext(sceneContextRaw);
+  try {
+    if (!parsed) return null;
     const summary = parsed.summary ?? {};
+    const createdByType2 = isPlainObject2(parsed.createdByType) ? parsed.createdByType : {};
     const rooms = Array.isArray(parsed.architecturalSummary?.spaces) ? parsed.architecturalSummary.spaces : Array.isArray(parsed.roomSummaries) ? parsed.roomSummaries : [];
-    const numberValue = (key) => Number(summary[key] ?? 0);
+    const createdCount = (key) => Array.isArray(createdByType2[key]) ? createdByType2[key].length : 0;
+    const numberValue = (key) => {
+      const summaryValue = Number(summary[key] ?? 0);
+      if (summaryValue > 0) return summaryValue;
+      if (key === "walls") return createdCount("wall");
+      if (key === "slabs") return createdCount("slab");
+      if (key === "doors") return createdCount("door");
+      if (key === "windows") return createdCount("window");
+      if (key === "zones") return createdCount("zone");
+      if (key === "items") return createdCount("item");
+      if (key === "rooms") return createdCount("slab");
+      return 0;
+    };
     const hasLayout = numberValue("walls") > 0 || numberValue("slabs") > 0 || numberValue("rooms") > 0;
     const hasDoors = numberValue("doors") > 0;
     const hasWindows = numberValue("windows") > 0;
@@ -23530,6 +24119,21 @@ function parseAgentSceneProgress(sceneContextRaw) {
   } catch {
     return null;
   }
+}
+function toolContractPhaseMatches(contract, phase) {
+  return contract.phases.includes("diagnostic") || contract.phases.includes(phase);
+}
+function toolNamesForPhase(phase, wantsExactCoordinates) {
+  return listAgentToolContracts().filter((contract) => {
+    if (contract.fallbackOnly && contract.name === "place_furniture" && !wantsExactCoordinates) return false;
+    if (phase === "validation_repair") {
+      return contract.phases.includes("validation_repair") || contract.phases.includes("diagnostic");
+    }
+    if (phase === "openings" && contract.phases.includes("layout")) {
+      return true;
+    }
+    return toolContractPhaseMatches(contract, phase);
+  }).map((contract) => contract.name);
 }
 function resolveAgentRunPolicy(userContent, lastValidation = null, sceneProgress = null) {
   const normalized = userContent.toLowerCase();
@@ -23563,22 +24167,7 @@ function resolveAgentRunPolicy(userContent, lastValidation = null, sceneProgress
   } else if (isResidential || isComplex) {
     phase = "openings";
   }
-  const repairTools = ["modify_node", "move_nodes", "batch_modify_nodes", "add_door_to_wall", "add_window_to_wall", "auto_align_windows", "suggest_furniture_layout", "place_furniture_solved", "delete_node", "validate_scene"];
-  const layoutTools = ["create_room", "create_apartment", "create_polygon_room", "create_l_shaped_room", "create_hallway", "create_walls", "create_slab", "create_zone", "validate_scene"];
-  const openingTools = ["create_door", "create_window", "add_door_to_wall", "add_window_to_wall", "auto_align_windows", "create_zone", "validate_scene"];
-  const furnishingTools = [
-    "suggest_furniture_layout",
-    "place_furniture_solved",
-    "furnish_room",
-    "place_in_room",
-    "place_against_wall",
-    ...wantsExactCoordinates ? ["place_furniture"] : [],
-    "place_wall_item",
-    "place_ceiling_item",
-    "validate_scene"
-  ];
-  const roofTools = ["create_roof", "create_ceiling", "place_wall_item", "place_ceiling_item", "validate_scene"];
-  const allowedNextTools = phase === "validation_repair" ? repairTools : phase === "furnishing" ? furnishingTools : phase === "roof_detail" ? roofTools : phase === "openings" ? [...openingTools, ...layoutTools] : layoutTools;
+  const allowedNextTools = toolNamesForPhase(phase, wantsExactCoordinates);
   return {
     codeProfile: isChineseResidential ? "china_residential" : "residential_default",
     phase,
@@ -23609,17 +24198,69 @@ function selectAgentToolsForPolicy(policy, lastValidation = null) {
     }
   }
   if (!policy.wantsExactCoordinates) allowed.delete("place_furniture");
-  const exposedToolNames = agentTools.map(agentToolName).filter((name) => Boolean(name && allowed.has(name)));
+  const allToolNames = agentTools.map(agentToolName).filter((name) => Boolean(name));
+  const exposedToolNames = allToolNames.filter((name) => allowed.has(name));
+  const hiddenToolNames = allToolNames.filter((name) => !allowed.has(name));
   const tools = agentTools.filter((tool) => {
     const name = agentToolName(tool);
     return Boolean(name && allowed.has(name));
   });
   const hiddenCount = agentTools.length - tools.length;
   const hiddenToolReasonSummary = hiddenCount === 0 ? "All tools are exposed for this agent turn." : `${hiddenCount} tools are hidden because the current phase is ${policy.phase}; hidden tools should be used in a later stage or after validation repair.`;
-  return { tools, exposedToolNames, hiddenToolReasonSummary };
+  return {
+    tools,
+    exposedToolNames,
+    hiddenToolNames,
+    hiddenToolReasonSummary,
+    toolDecisionCards: buildToolDecisionCards(exposedToolNames, policy, lastValidation)
+  };
+}
+function buildToolDecisionCards(toolNames, policy, lastValidation) {
+  const candidateRefs = collectCandidateRefs();
+  return toolNames.filter((tool) => tool !== "get_scene_info").slice(0, 12).map((tool) => {
+    const contract = getAgentToolContract(tool);
+    const readinessCandidateRefs = {};
+    if (contract?.requiresSlabId && candidateRefs.slabs?.length) readinessCandidateRefs.slabs = candidateRefs.slabs;
+    if (contract?.requiresWallId && candidateRefs.walls?.length) readinessCandidateRefs.walls = candidateRefs.walls;
+    if (contract?.requiresNodeId && candidateRefs.nodes?.length) readinessCandidateRefs.nodes = candidateRefs.nodes;
+    const schemaRequired = requiredArgumentsForTool(tool);
+    const prerequisites = [
+      contract?.requiresLayout ? "layout_exists" : null,
+      contract?.requiresSlabId ? "slabId" : null,
+      contract?.requiresWallId ? "wallId" : null,
+      contract?.requiresNodeId ? "nodeId/nodeIds" : null,
+      contract?.requiresNonBlockingValidation ? "non_blocking_validation" : null
+    ].filter((value) => Boolean(value));
+    return {
+      tool,
+      phases: contract?.phases ?? ["diagnostic"],
+      requiredArguments: schemaRequired,
+      prerequisites,
+      ...hasCandidateRefs(readinessCandidateRefs) ? { candidateRefs: readinessCandidateRefs } : {},
+      nextAction: nextActionForTool(tool, contract, policy, lastValidation)
+    };
+  });
+}
+function requiredArgumentsForTool(toolName) {
+  const tool = findAgentTool(toolName);
+  const parameters = tool?.type === "function" ? tool.function.parameters : null;
+  if (!isSchemaObject(parameters) || !Array.isArray(parameters.required)) return [];
+  return parameters.required.filter((value) => typeof value === "string");
+}
+function nextActionForTool(toolName, contract, policy, lastValidation) {
+  if (policy.phase === "validation_repair" && lastValidation?.blocking) {
+    return `Fix blocking rules (${(lastValidation.blockingRuleIds ?? []).join(", ") || "unknown"}), then run validate_scene.`;
+  }
+  if (contract?.recoveryAction) return contract.recoveryAction;
+  if (toolName === "validate_scene") return `Validate with ${policy.codeProfile}.`;
+  return "Use this tool only with complete schema arguments and known scene IDs.";
 }
 function buildBlockedToolResult(toolName, policy, exposure, lastValidation = null) {
+  const contract = getAgentToolContract(toolName);
+  const candidateRefs = collectCandidateRefs();
   return {
+    success: false,
+    failureKind: "phase",
     blocked: true,
     tool: toolName,
     phaseBlockedBy: policy.phase,
@@ -23628,7 +24269,24 @@ function buildBlockedToolResult(toolName, policy, exposure, lastValidation = nul
     allowedNextTools: exposure.exposedToolNames,
     requiredRuleFixes: lastValidation?.blockingRuleIds ?? [],
     repairHints: lastValidation?.blocking ? (lastValidation.repairHints ?? []).slice(0, 5) : [],
+    candidateRefs,
+    recommendedNextTool: contract?.recommendedTool ?? exposure.exposedToolNames[0] ?? "get_scene_info",
+    retryArgsHint: retryArgsHintForTool(contract?.recommendedTool ?? exposure.exposedToolNames[0] ?? toolName, candidateRefs),
     nextAction: "Choose one of allowedNextTools for this turn. If the intended tool is hidden, complete the current validation/staging phase first."
+  };
+}
+function buildInvalidJsonToolResult(toolName, rawArguments, message) {
+  return {
+    success: false,
+    failureKind: "invalid_json",
+    error: "Invalid tool arguments JSON",
+    tool: toolName,
+    arguments: rawArguments,
+    message,
+    candidateRefs: collectCandidateRefs(),
+    recommendedNextTool: toolName,
+    retryArgsHint: {},
+    nextAction: "Call the same exposed tool again with complete valid JSON arguments that match the tool schema."
   };
 }
 function parseValidationSnapshot(raw) {
@@ -23663,6 +24321,7 @@ function buildValidationMessage(snapshot, policy) {
     ruleSummary: snapshot.ruleSummary ?? {},
     repairHints: (snapshot.repairHints ?? []).slice(0, 8),
     allowedNextTools: snapshot.blocking ? policy.allowedNextTools : void 0,
+    toolDecisionCards: snapshot.blocking ? buildToolDecisionCards(policy.allowedNextTools, policy, snapshot).slice(0, 8) : void 0,
     nextAction: snapshot.nextAction ?? (snapshot.blocking ? "Use repairHints with the allowed repair tools, then validate again before furniture/roof/detail work." : "Validation passed; continue to the next staged generation phase.")
   };
   return `[Spatial Auto-Validation JSON]
@@ -23698,6 +24357,115 @@ function stagedDeferralForTool(toolName, userContent, lastValidation, policy = r
     };
   }
   return null;
+}
+function validateToolReadiness(toolName, args, policy, sceneProgress = policy.sceneProgress ?? null, lastValidation = null) {
+  const candidateRefs = collectCandidateRefs();
+  const contract = getAgentToolContract(toolName);
+  const schemaValidation = validateToolArguments(toolName, args);
+  if (!schemaValidation.valid) {
+    return {
+      valid: false,
+      failureKind: classifyArgumentFailure(schemaValidation.errors),
+      errors: schemaValidation.errors,
+      required: schemaValidation.required,
+      missingInputs: missingInputsForErrors(schemaValidation.errors),
+      candidateRefs,
+      recommendedTool: recommendedNextToolForInvalidArgs(toolName, schemaValidation.errors),
+      recommendedNextTool: recommendedNextToolForInvalidArgs(toolName, schemaValidation.errors),
+      retryArgsHint: retryArgsHintForTool(toolName, candidateRefs)
+    };
+  }
+  const missingInputs = [];
+  const errors = [];
+  if (contract?.requiresLayout && !sceneProgress?.hasLayout) {
+    missingInputs.push("layout");
+    errors.push("layout is required before this tool can run");
+  }
+  if (contract?.requiresSlabId && !hasRoomBoundsArgs(args)) {
+    missingInputs.push("slabId");
+    errors.push("slabId or complete room bounds are required before this tool can run");
+  }
+  if (contract?.requiresWallId && !hasWallArgs(toolName, args)) {
+    missingInputs.push(toolName === "auto_align_windows" ? "wallIds" : "wallId");
+    errors.push(`${toolName === "auto_align_windows" ? "wallIds" : "wallId"} is required before this tool can run`);
+  }
+  if (contract?.requiresNodeId && !hasNodeArgs(toolName, args)) {
+    missingInputs.push(toolName === "move_nodes" || toolName === "batch_modify_nodes" ? "nodeIds" : "nodeId");
+    errors.push(`${toolName === "move_nodes" || toolName === "batch_modify_nodes" ? "nodeIds" : "nodeId"} is required before this tool can run`);
+  }
+  if (contract?.requiresNonBlockingValidation && lastValidation?.blocking && policy.phase !== "validation_repair") {
+    errors.push("non-blocking validation is required before this post-layout tool can run");
+  }
+  if (errors.length > 0) {
+    return {
+      valid: false,
+      failureKind: lastValidation?.blocking && contract?.requiresNonBlockingValidation ? "blocked_validation" : "missing_scene_prerequisite",
+      errors,
+      required: requiredArgumentsForTool(toolName),
+      missingInputs,
+      candidateRefs,
+      recommendedTool: contract?.recommendedTool ?? (missingInputs.includes("layout") ? "create_room" : "get_scene_info"),
+      recommendedNextTool: contract?.recommendedTool ?? (missingInputs.includes("layout") ? "create_room" : "get_scene_info"),
+      retryArgsHint: retryArgsHintForTool(toolName, candidateRefs)
+    };
+  }
+  return { valid: true, errors: [], required: requiredArgumentsForTool(toolName) };
+}
+function hasRoomBoundsArgs(args) {
+  if (typeof args.slabId === "string" && args.slabId.length > 0) return true;
+  return Array.isArray(args.roomOrigin) && typeof args.roomWidth === "number" && typeof args.roomDepth === "number";
+}
+function hasWallArgs(toolName, args) {
+  if (toolName === "auto_align_windows") return Array.isArray(args.wallIds) && args.wallIds.length > 0;
+  return typeof args.wallId === "string" && args.wallId.length > 0;
+}
+function hasNodeArgs(toolName, args) {
+  if (toolName === "move_nodes" || toolName === "batch_modify_nodes") return Array.isArray(args.nodeIds) && args.nodeIds.length > 0;
+  return typeof args.nodeId === "string" && args.nodeId.length > 0;
+}
+function buildToolReadinessFailureResult(toolName, readiness) {
+  return {
+    success: false,
+    failureKind: readiness.failureKind ?? "missing_scene_prerequisite",
+    error: "Tool is not ready to execute",
+    tool: toolName,
+    argumentErrors: readiness.errors,
+    requiredArguments: readiness.required ?? [],
+    missingInputs: readiness.missingInputs ?? [],
+    candidateRefs: readiness.candidateRefs ?? collectCandidateRefs(),
+    recommendedTool: readiness.recommendedTool,
+    recommendedNextTool: readiness.recommendedNextTool ?? readiness.recommendedTool ?? "get_scene_info",
+    retryArgsHint: readiness.retryArgsHint ?? {},
+    nextAction: "Use candidateRefs and retryArgsHint to call the recommended tool or retry this tool with complete IDs."
+  };
+}
+function createAgentTraceEntry(policy, exposure, gateDecision, toolCall, readinessFailure, lastValidation = null) {
+  return {
+    phase: policy.phase,
+    codeProfile: policy.codeProfile,
+    exposedToolNames: exposure.exposedToolNames,
+    hiddenToolNames: exposure.hiddenToolNames,
+    ...toolCall ? { toolCall } : {},
+    gateDecision,
+    ...readinessFailure && !readinessFailure.valid ? { readinessFailure } : {},
+    validationBlockingRuleIds: lastValidation?.blockingRuleIds ?? []
+  };
+}
+function appendAgentTraceToToolResult(rawResult, agentTrace) {
+  try {
+    const parsed = JSON.parse(rawResult);
+    if (isPlainObject2(parsed)) {
+      return JSON.stringify({ ...parsed, agentTrace });
+    }
+  } catch {
+  }
+  return JSON.stringify({
+    success: false,
+    failureKind: "schema",
+    error: "Tool returned non-JSON result",
+    rawResult,
+    agentTrace
+  });
 }
 var useAgent = create2((set2, get) => ({
   messages: [],
@@ -23753,8 +24521,10 @@ async function runAgentLoop(userContent, get, set2) {
     const toolExposure = selectAgentToolsForPolicy(runPolicy, lastValidation);
     const toolContext = {
       exposedToolNames: toolExposure.exposedToolNames,
+      hiddenToolNames: toolExposure.hiddenToolNames,
       hiddenToolReasonSummary: toolExposure.hiddenToolReasonSummary,
-      instruction: "Only call tools listed in exposedToolNames this turn. Tools not exposed are intentionally hidden for the current architectural phase."
+      toolDecisionCards: toolExposure.toolDecisionCards,
+      instruction: "Only call tools listed in exposedToolNames this turn. Use toolDecisionCards for required IDs, candidateRefs, and next action. Tools not exposed are intentionally hidden for the current architectural phase."
     };
     const systemWithContext = `${SYSTEM_PROMPT}
 
@@ -23816,11 +24586,13 @@ ${sceneContext}`;
           toolArgs = tc.arguments.trim() ? JSON.parse(tc.arguments) : {};
         } catch (err) {
           result = JSON.stringify({
-            error: "Invalid tool arguments JSON",
-            tool: tc.name,
-            arguments: tc.arguments,
-            message: err instanceof Error ? err.message : String(err),
-            nextAction: "Call the same tool again with complete valid JSON arguments that match the tool schema."
+            ...buildInvalidJsonToolResult(tc.name, tc.arguments, err instanceof Error ? err.message : String(err)),
+            agentTrace: createAgentTraceEntry(runPolicy, toolExposure, "invalid_json", tc.name, {
+              valid: false,
+              failureKind: "invalid_json",
+              errors: [err instanceof Error ? err.message : String(err)],
+              candidateRefs: collectCandidateRefs()
+            }, lastValidation)
           });
           const toolMsg2 = {
             id: genId(),
@@ -23834,24 +24606,37 @@ ${sceneContext}`;
           continue;
         }
         const stagedDeferral = isSceneModifyingTool ? stagedDeferralForTool(tc.name, userContent, lastValidation, runPolicy) : null;
-        const argumentValidation = isExposedTool ? validateToolArguments(tc.name, toolArgs) : null;
+        const readiness = isExposedTool ? validateToolReadiness(tc.name, toolArgs, runPolicy, sceneProgress, lastValidation) : null;
         if (!isExposedTool) {
-          result = JSON.stringify(buildBlockedToolResult(tc.name, runPolicy, toolExposure, lastValidation));
-        } else if (argumentValidation && !argumentValidation.valid) {
-          result = JSON.stringify(buildInvalidToolArgumentsResult(tc.name, argumentValidation));
+          result = JSON.stringify({
+            ...buildBlockedToolResult(tc.name, runPolicy, toolExposure, lastValidation),
+            agentTrace: createAgentTraceEntry(runPolicy, toolExposure, "blocked", tc.name, void 0, lastValidation)
+          });
+        } else if (readiness && !readiness.valid) {
+          result = JSON.stringify({
+            ...buildToolReadinessFailureResult(tc.name, readiness),
+            agentTrace: createAgentTraceEntry(runPolicy, toolExposure, "invalid_arguments", tc.name, readiness, lastValidation)
+          });
         } else if (stagedDeferral) {
-          result = JSON.stringify(stagedDeferral);
+          result = JSON.stringify({
+            ...stagedDeferral,
+            agentTrace: createAgentTraceEntry(runPolicy, toolExposure, "deferred", tc.name, void 0, lastValidation)
+          });
         } else if (isSceneModifyingTool && sceneModificationCount >= MAX_SCENE_MODIFYING_TOOLS_PER_ITERATION) {
           result = JSON.stringify({
+            success: false,
+            failureKind: "phase",
             deferred: true,
             tool: tc.name,
             phaseBlockedBy: runPolicy.phase,
             allowedNextTools: runPolicy.allowedNextTools,
+            agentTrace: createAgentTraceEntry(runPolicy, toolExposure, "deferred", tc.name, void 0, lastValidation),
             reason: "Scene generation is staged. Review the validation report from the previous modification, then call this tool again if it is still appropriate.",
             nextAction: "Continue with the next architectural phase only after spatial and building-code warnings are resolved."
           });
         } else {
-          result = executeToolCall(tc.name, toolArgs);
+          const rawResult = executeToolCall(tc.name, toolArgs);
+          result = appendAgentTraceToToolResult(rawResult, createAgentTraceEntry(runPolicy, toolExposure, "executed", tc.name, void 0, lastValidation));
           if (isSceneModifyingTool) {
             hasSceneModification = true;
             sceneModificationCount++;
@@ -24049,6 +24834,7 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function getByPath(source, path2) {
+  if (path2 === "$") return source;
   if (path2 === "") return source;
   return path2.split(".").reduce((current, part) => {
     if (Array.isArray(current)) {
@@ -24170,7 +24956,7 @@ async function runCase(testCase, verbose) {
     resetScene();
     for (let index = 0; index < testCase.steps.length; index++) {
       const step = testCase.steps[index];
-      const args = step.args ?? {};
+      const args = resolveStepArgs(step.args ?? {}, stepResults);
       const raw = executeHarnessStep(step.tool, args);
       const parsed = parseToolResult(raw);
       stepResults.push({ index, tool: step.tool, args, raw, parsed });
@@ -24198,6 +24984,23 @@ async function runCase(testCase, verbose) {
     assertions,
     ...assertions.some((assertion) => !assertion.pass) ? { error: assertions.find((assertion) => !assertion.pass)?.message } : {}
   };
+}
+function resolveStepArgs(args, steps) {
+  const resolved = {};
+  for (const [key, value] of Object.entries(args)) {
+    resolved[key] = resolveStepArgValue(value, steps);
+  }
+  return resolved;
+}
+function resolveStepArgValue(value, steps) {
+  if (isRecord(value) && typeof value.fromStep === "number" && typeof value.path === "string") {
+    return getByPath(steps[value.fromStep]?.parsed, value.path);
+  }
+  if (Array.isArray(value)) return value.map((item) => resolveStepArgValue(item, steps));
+  if (isRecord(value)) {
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, resolveStepArgValue(child, steps)]));
+  }
+  return value;
 }
 function resetScene() {
   clearSceneHistory();
@@ -24230,6 +25033,18 @@ function evaluateAssertion(assertion, steps, validation) {
       return assertAgentToolGate(assertion);
     case "agent.toolArgs":
       return assertAgentToolArgs(assertion);
+    case "agent.toolArgsFromStep":
+      return assertAgentToolArgsFromStep(assertion, steps);
+    case "agent.toolContract":
+      return assertAgentToolContract(assertion);
+    case "agent.toolReadiness":
+      return assertAgentToolReadiness(assertion);
+    case "toolResult.failureShape":
+      return assertToolResultFailureShape(assertion, steps);
+    case "toolResult.candidateRefs":
+      return assertToolResultCandidateRefs(assertion, steps);
+    case "agent.trace":
+      return assertAgentTrace(assertion, steps);
     case "node.count":
       return assertNodeCount(assertion);
     case "node.exists":
@@ -24265,6 +25080,37 @@ function executeHarnessStep(tool, args) {
       String(args.userContent ?? ""),
       isRecord(args.lastValidation) ? args.lastValidation : null
     ));
+  }
+  if (tool === "agent.invalid_json") {
+    const sceneContext = typeof args.sceneContext === "string" ? args.sceneContext : isRecord(args.sceneContext) ? JSON.stringify(args.sceneContext) : null;
+    const sceneProgress = parseAgentSceneProgress(sceneContext);
+    const policy = resolveAgentRunPolicy(String(args.userContent ?? ""), null, sceneProgress);
+    const exposure = selectAgentToolsForPolicy(policy, null);
+    return JSON.stringify({
+      success: false,
+      failureKind: "invalid_json",
+      error: "Invalid tool arguments JSON",
+      tool: String(args.toolName ?? ""),
+      arguments: String(args.arguments ?? ""),
+      candidateRefs: {},
+      recommendedNextTool: String(args.toolName ?? ""),
+      retryArgsHint: {},
+      agentTrace: createAgentTraceEntry(policy, exposure, "invalid_json", String(args.toolName ?? ""), {
+        valid: false,
+        failureKind: "invalid_json",
+        errors: ["Unexpected token"]
+      })
+    });
+  }
+  if (tool === "agent.tool_readiness") {
+    const userContent = String(args.userContent ?? "");
+    const lastValidation = isRecord(args.lastValidation) ? args.lastValidation : null;
+    const sceneContext = typeof args.sceneContext === "string" ? args.sceneContext : isRecord(args.sceneContext) ? JSON.stringify(args.sceneContext) : executeToolCall("get_scene_info", {});
+    const sceneProgress = parseAgentSceneProgress(sceneContext);
+    const policy = resolveAgentRunPolicy(userContent, lastValidation, sceneProgress);
+    const toolArgs = isRecord(args.toolArgs) ? args.toolArgs : {};
+    const readiness = validateToolReadiness(String(args.toolName ?? ""), toolArgs, policy, sceneProgress, lastValidation);
+    return JSON.stringify(readiness.valid ? readiness : buildToolReadinessFailureResult(String(args.toolName ?? ""), readiness));
   }
   return executeToolCall(tool, args);
 }
@@ -24423,6 +25269,146 @@ function assertAgentToolArgs(assertion) {
     pass: failures.length === 0,
     type: "agent.toolArgs",
     message: failures.length === 0 ? "agent tool arguments matched" : failures.join("; ")
+  };
+}
+function assertAgentToolArgsFromStep(assertion, steps) {
+  const resolvedArgs = {};
+  for (const [key, value] of Object.entries(assertion.args)) {
+    if (isRecord(value) && typeof value.fromStep === "number" && typeof value.path === "string") {
+      resolvedArgs[key] = getByPath(steps[value.fromStep]?.parsed, value.path);
+    } else {
+      resolvedArgs[key] = value;
+    }
+  }
+  const validation = validateToolArguments(assertion.toolName, resolvedArgs);
+  const result = validation.valid ? null : buildInvalidToolArgumentsResult(assertion.toolName, validation);
+  const failures = [];
+  const expectedValid = assertion.valid ?? true;
+  if (validation.valid !== expectedValid) {
+    failures.push(`valid expected ${expectedValid}, received ${validation.valid}`);
+  }
+  const errorText = [...validation.errors, ...Array.isArray(result?.argumentErrors) ? result.argumentErrors.map(String) : []].join("\n");
+  for (const expected of assertion.mustIncludeErrors ?? []) {
+    if (!errorText.includes(expected)) failures.push(`argument errors missing ${expected}`);
+  }
+  return {
+    pass: failures.length === 0,
+    type: "agent.toolArgsFromStep",
+    message: failures.length === 0 ? "agent tool arguments from step matched" : failures.join("; ")
+  };
+}
+function assertAgentToolContract(assertion) {
+  const contract = getAgentToolContract(assertion.toolName);
+  const failures = [];
+  if (!contract) failures.push(`missing contract for ${assertion.toolName}`);
+  if (contract) {
+    for (const phase of assertion.phases ?? []) {
+      if (!contract.phases.includes(phase)) failures.push(`contract phases missing ${phase}`);
+    }
+    if (assertion.modifiesScene !== void 0 && Boolean(contract.modifiesScene) !== assertion.modifiesScene) {
+      failures.push(`modifiesScene expected ${assertion.modifiesScene}, received ${Boolean(contract.modifiesScene)}`);
+    }
+    if (assertion.fallbackOnly !== void 0 && Boolean(contract.fallbackOnly) !== assertion.fallbackOnly) {
+      failures.push(`fallbackOnly expected ${assertion.fallbackOnly}, received ${Boolean(contract.fallbackOnly)}`);
+    }
+    if (assertion.requiresLayout !== void 0 && Boolean(contract.requiresLayout) !== assertion.requiresLayout) {
+      failures.push(`requiresLayout expected ${assertion.requiresLayout}, received ${Boolean(contract.requiresLayout)}`);
+    }
+    if (assertion.requiresSlabId !== void 0 && Boolean(contract.requiresSlabId) !== assertion.requiresSlabId) {
+      failures.push(`requiresSlabId expected ${assertion.requiresSlabId}, received ${Boolean(contract.requiresSlabId)}`);
+    }
+    if (assertion.requiresWallId !== void 0 && Boolean(contract.requiresWallId) !== assertion.requiresWallId) {
+      failures.push(`requiresWallId expected ${assertion.requiresWallId}, received ${Boolean(contract.requiresWallId)}`);
+    }
+    if (assertion.requiresNonBlockingValidation !== void 0 && Boolean(contract.requiresNonBlockingValidation) !== assertion.requiresNonBlockingValidation) {
+      failures.push(`requiresNonBlockingValidation expected ${assertion.requiresNonBlockingValidation}, received ${Boolean(contract.requiresNonBlockingValidation)}`);
+    }
+  }
+  return {
+    pass: failures.length === 0,
+    type: "agent.toolContract",
+    message: failures.length === 0 ? "agent tool contract matched" : failures.join("; ")
+  };
+}
+function assertAgentToolReadiness(assertion) {
+  const lastValidation = isRecord(assertion.lastValidation) ? assertion.lastValidation : null;
+  const sceneContext = typeof assertion.sceneContext === "string" ? assertion.sceneContext : isRecord(assertion.sceneContext) ? JSON.stringify(assertion.sceneContext) : null;
+  const sceneProgress = parseAgentSceneProgress(sceneContext);
+  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress);
+  const readiness = validateToolReadiness(assertion.toolName, assertion.args, policy, sceneProgress, lastValidation);
+  const result = readiness.valid ? readiness : buildToolReadinessFailureResult(assertion.toolName, readiness);
+  const failures = [];
+  const expectedValid = assertion.valid ?? true;
+  if (readiness.valid !== expectedValid) failures.push(`valid expected ${expectedValid}, received ${readiness.valid}`);
+  if (assertion.failureKind !== void 0 && readiness.failureKind !== assertion.failureKind) {
+    failures.push(`failureKind expected ${assertion.failureKind}, received ${String(readiness.failureKind)}`);
+  }
+  const missingInputs = Array.isArray(result.missingInputs) ? result.missingInputs.map(String) : [];
+  for (const input of assertion.mustIncludeMissingInputs ?? []) {
+    if (!missingInputs.includes(input)) failures.push(`missingInputs missing ${input}`);
+  }
+  const candidateRefs = isRecord(result.candidateRefs) ? result.candidateRefs : {};
+  for (const key of assertion.mustIncludeCandidateRefs ?? []) {
+    if (!Array.isArray(candidateRefs[key]) || candidateRefs[key].length === 0) failures.push(`candidateRefs missing ${key}`);
+  }
+  if (assertion.recommendedNextTool !== void 0 && result.recommendedNextTool !== assertion.recommendedNextTool) {
+    failures.push(`recommendedNextTool expected ${assertion.recommendedNextTool}, received ${String(result.recommendedNextTool)}`);
+  }
+  return {
+    pass: failures.length === 0,
+    type: "agent.toolReadiness",
+    message: failures.length === 0 ? "agent tool readiness matched" : failures.join("; ")
+  };
+}
+function assertToolResultFailureShape(assertion, steps) {
+  const parsed = steps[assertion.step]?.parsed;
+  if (!isRecord(parsed)) return { pass: false, type: "toolResult.failureShape", message: "step result was not an object" };
+  const failures = [];
+  if (parsed.success !== false) failures.push(`success expected false, received ${String(parsed.success)}`);
+  if (assertion.failureKind !== void 0 && parsed.failureKind !== assertion.failureKind) {
+    failures.push(`failureKind expected ${assertion.failureKind}, received ${String(parsed.failureKind)}`);
+  }
+  for (const field of assertion.mustIncludeFields ?? []) {
+    if (getByPath(parsed, field) === void 0) failures.push(`missing field ${field}`);
+  }
+  return {
+    pass: failures.length === 0,
+    type: "toolResult.failureShape",
+    message: failures.length === 0 ? "failure shape matched" : failures.join("; ")
+  };
+}
+function assertToolResultCandidateRefs(assertion, steps) {
+  const parsed = steps[assertion.step]?.parsed;
+  const candidateRefs = isRecord(parsed) && isRecord(parsed.candidateRefs) ? parsed.candidateRefs : {};
+  const failures = [];
+  for (const key of assertion.mustInclude ?? []) {
+    if (!Array.isArray(candidateRefs[key]) || candidateRefs[key].length === 0) failures.push(`candidateRefs missing ${key}`);
+  }
+  return {
+    pass: failures.length === 0,
+    type: "toolResult.candidateRefs",
+    message: failures.length === 0 ? "candidate refs matched" : failures.join("; ")
+  };
+}
+function assertAgentTrace(assertion, steps) {
+  const trace = getByPath(steps[assertion.step]?.parsed, "agentTrace");
+  if (!isRecord(trace)) return { pass: false, type: "agent.trace", message: "agentTrace was not an object" };
+  const failures = [];
+  if (assertion.phase !== void 0 && trace.phase !== assertion.phase) failures.push(`phase expected ${assertion.phase}, received ${String(trace.phase)}`);
+  if (assertion.gateDecision !== void 0 && trace.gateDecision !== assertion.gateDecision) failures.push(`gateDecision expected ${assertion.gateDecision}, received ${String(trace.gateDecision)}`);
+  if (assertion.toolCall !== void 0 && trace.toolCall !== assertion.toolCall) failures.push(`toolCall expected ${assertion.toolCall}, received ${String(trace.toolCall)}`);
+  const exposed = Array.isArray(trace.exposedToolNames) ? trace.exposedToolNames : [];
+  for (const tool of assertion.mustIncludeExposed ?? []) {
+    if (!exposed.includes(tool)) failures.push(`exposedToolNames missing ${tool}`);
+  }
+  const hidden = Array.isArray(trace.hiddenToolNames) ? trace.hiddenToolNames : [];
+  for (const tool of assertion.mustIncludeHidden ?? []) {
+    if (!hidden.includes(tool)) failures.push(`hiddenToolNames missing ${tool}`);
+  }
+  return {
+    pass: failures.length === 0,
+    type: "agent.trace",
+    message: failures.length === 0 ? "agent trace matched" : failures.join("; ")
   };
 }
 function assertNodeCount(assertion) {

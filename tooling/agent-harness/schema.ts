@@ -8,9 +8,11 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue }
 
+export type StepArgValue = JsonValue | FieldFromStep
+
 export interface HarnessStep {
   tool: string
-  args?: Record<string, JsonValue>
+  args?: Record<string, StepArgValue>
 }
 
 export type ToolResultSuccessAssertion = {
@@ -81,6 +83,69 @@ export type AgentToolArgsAssertion = {
   args: Record<string, JsonValue>
   valid?: boolean
   mustIncludeErrors?: string[]
+}
+
+export type FieldFromStep = {
+  fromStep: number
+  path: string
+}
+
+export type AgentToolArgsFromStepAssertion = {
+  type: 'agent.toolArgsFromStep'
+  toolName: string
+  step: number
+  args: Record<string, JsonValue | FieldFromStep>
+  valid?: boolean
+  mustIncludeErrors?: string[]
+}
+
+export type AgentToolContractAssertion = {
+  type: 'agent.toolContract'
+  toolName: string
+  phases?: string[]
+  modifiesScene?: boolean
+  fallbackOnly?: boolean
+  requiresLayout?: boolean
+  requiresSlabId?: boolean
+  requiresWallId?: boolean
+  requiresNonBlockingValidation?: boolean
+}
+
+export type AgentToolReadinessAssertion = {
+  type: 'agent.toolReadiness'
+  toolName: string
+  userContent: string
+  args: Record<string, JsonValue>
+  lastValidation?: Record<string, JsonValue>
+  sceneContext?: string | Record<string, JsonValue>
+  valid?: boolean
+  failureKind?: string
+  mustIncludeMissingInputs?: string[]
+  mustIncludeCandidateRefs?: Array<'slabs' | 'walls' | 'nodes'>
+  recommendedNextTool?: string
+}
+
+export type ToolResultFailureShapeAssertion = {
+  type: 'toolResult.failureShape'
+  step: number
+  failureKind?: string
+  mustIncludeFields?: string[]
+}
+
+export type ToolResultCandidateRefsAssertion = {
+  type: 'toolResult.candidateRefs'
+  step: number
+  mustInclude?: Array<'slabs' | 'walls' | 'nodes'>
+}
+
+export type AgentTraceAssertion = {
+  type: 'agent.trace'
+  step: number
+  phase?: string
+  gateDecision?: string
+  toolCall?: string
+  mustIncludeExposed?: string[]
+  mustIncludeHidden?: string[]
 }
 
 export type NodeCountAssertion = {
@@ -172,6 +237,12 @@ export type HarnessAssertion =
   | AgentToolExposureAssertion
   | AgentToolGateAssertion
   | AgentToolArgsAssertion
+  | AgentToolArgsFromStepAssertion
+  | AgentToolContractAssertion
+  | AgentToolReadinessAssertion
+  | ToolResultFailureShapeAssertion
+  | ToolResultCandidateRefsAssertion
+  | AgentTraceAssertion
   | NodeCountAssertion
   | NodeExistsAssertion
   | ClosedWallsAssertion
@@ -267,6 +338,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 export function getByPath(source: unknown, path: string): unknown {
+  if (path === '$') return source
   if (path === '') return source
   return path.split('.').reduce<unknown>((current, part) => {
     if (Array.isArray(current)) {

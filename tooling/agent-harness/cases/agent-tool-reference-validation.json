@@ -1,0 +1,61 @@
+{
+  "name": "agent-tool-reference-validation",
+  "description": "Agent validates scene node references before executing tools that target existing walls, slabs, levels, or nodes.",
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": { "origin": [0, 0], "width": 5, "depth": 4, "addDoor": true, "addWindows": true }
+    }
+  ],
+  "assertions": [
+    {
+      "type": "agent.toolArgsFromStep",
+      "toolName": "add_window_to_wall",
+      "step": 0,
+      "args": {
+        "wallId": { "fromStep": 0, "path": "spatialContext.wallsByFace.north.id" },
+        "width": 1.2
+      },
+      "valid": true
+    },
+    {
+      "type": "agent.toolArgs",
+      "toolName": "add_window_to_wall",
+      "args": { "wallId": "wall_missing", "width": 1.2 },
+      "valid": false,
+      "mustIncludeErrors": ["arguments.wallId references missing node wall_missing"]
+    },
+    {
+      "type": "agent.toolArgsFromStep",
+      "toolName": "add_window_to_wall",
+      "step": 0,
+      "args": {
+        "wallId": { "fromStep": 0, "path": "slab.slabId" },
+        "width": 1.2
+      },
+      "valid": false,
+      "mustIncludeErrors": ["arguments.wallId expected wall node"]
+    },
+    {
+      "type": "agent.toolArgsFromStep",
+      "toolName": "place_furniture_solved",
+      "step": 0,
+      "args": {
+        "roomType": "bedroom",
+        "slabId": { "fromStep": 0, "path": "slab.slabId" }
+      },
+      "valid": true
+    },
+    {
+      "type": "agent.toolArgsFromStep",
+      "toolName": "place_furniture_solved",
+      "step": 0,
+      "args": {
+        "roomType": "bedroom",
+        "slabId": { "fromStep": 0, "path": "spatialContext.wallsByFace.north.id" }
+      },
+      "valid": false,
+      "mustIncludeErrors": ["arguments.slabId expected slab node"]
+    }
+  ]
+}

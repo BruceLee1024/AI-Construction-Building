@@ -1,5 +1,35 @@
 # Development Log
 
+## 2026-06-01 11:57 CST
+
+### Completed
+
+- Landed the furnishing solver line across commits `a1e76b4`, `9158fc8`, `a8ad3e2`, and `e2f0ad5`, adding layout suggestions, solved furniture placement, tighter spatial constraints, and door-clearance repair guidance for the editor agent workflow.
+- Hardened agent execution in commits `9926cca` and `4b7e55d` so tool use is gated by scene phase rather than prompt drift alone. Hidden tools now return structured blocked results with allowed follow-up tools, validation rule IDs, repair hints, and explicit next actions.
+- Added schema-based tool argument validation in [`/Volumes/Bruce/AI Dev/Projects_2026/editor-main/packages/editor/src/store/use-agent.ts`](/Volumes/Bruce/AI%20Dev/Projects_2026/editor-main/packages/editor/src/store/use-agent.ts) and mirrored that behavior in the harness so malformed calls fail deterministically before scene mutation.
+- Expanded harness coverage in [`/Volumes/Bruce/AI Dev/Projects_2026/editor-main/tooling/agent-harness/run.ts`](/Volumes/Bruce/AI%20Dev/Projects_2026/editor-main/tooling/agent-harness/run.ts), [`/Volumes/Bruce/AI Dev/Projects_2026/editor-main/tooling/agent-harness/schema.ts`](/Volumes/Bruce/AI%20Dev/Projects_2026/editor-main/tooling/agent-harness/schema.ts), and the new cases `agent-tool-gate-blocked.json` and `agent-tool-args-validation.json` to assert runtime gating and argument validation as behavior contracts.
+- Improved the development-log hook in [`/Volumes/Bruce/AI Dev/Projects_2026/editor-main/.codex/hooks/devlog-hook.mjs`](/Volumes/Bruce/AI%20Dev/Projects_2026/editor-main/.codex/hooks/devlog-hook.mjs) so stop-time summaries synthesize changed files, command classes, and hook/artifact risks instead of echoing raw tool events.
+- Current uncommitted work also updates [`/Volumes/Bruce/AI Dev/Projects_2026/editor-main/packages/editor/src/lib/agent/executor.ts`](/Volumes/Bruce/AI%20Dev/Projects_2026/editor-main/packages/editor/src/lib/agent/executor.ts) to return structured failures for unknown tools and runtime exceptions, keeping agent retries on the staged-tool path.
+
+### Lessons Learned
+
+- Furniture automation became more reliable once placement moved from generic `place_furniture` calls to a dedicated solved-placement path with stricter spatial constraints and repair-aware follow-ups.
+- Agent safety needs two independent guards: exposure control decides whether a tool is legal in the current phase, and schema validation decides whether the supplied arguments are executable.
+- Harness assertions are most valuable when they check user-visible orchestration behavior such as blocked phases, allowed next tools, and actionable argument errors, not only scene geometry outputs.
+- Development logging quality improved once synthesis used changed-file context and stop-time analysis; raw tool records alone were not enough to produce useful lessons or follow-up advice.
+
+### Risks And Follow-Ups
+
+- The working tree still contains uncommitted changes in the hook, executor, agent store, harness source, generated bundle, and two new harness fixtures; this work should be validated and committed as one orchestration-focused unit.
+- [`/Volumes/Bruce/AI Dev/Projects_2026/editor-main/artifacts/agent-harness/.bundle/run.mjs`](/Volumes/Bruce/AI%20Dev/Projects_2026/editor-main/artifacts/agent-harness/.bundle/run.mjs) changed alongside source files, so the generated artifact needs an explicit keep-or-regenerate decision before review.
+- Schema validation currently supports the JSON-schema features used by the present tool set; adding richer schemas later will require extending the local validator to avoid false confidence.
+- The new blocked-result and invalid-argument payloads should be covered by a focused harness run before they are treated as stable agent contracts.
+
+### Source
+
+- Recent commits reviewed: `4b7e55d` "Restrict agent tool exposure by scene phase", `9926cca` "Harden agent tool orchestration and harness cases", `e2f0ad5` "Enhance furniture spatial solver and constraints", `e5d7098` "Add repair hint coverage for door clearance", `a8ad3e2` "Implement furniture placement solver and integrate it into furnishing", `9158fc8` "Prioritize furniture solver tools in agent prompt", `a1e76b4` "Add furniture layout solver and placement suggestions".
+- Current uncommitted files reviewed: [`/Volumes/Bruce/AI Dev/Projects_2026/editor-main/.codex/hooks/devlog-hook.mjs`](/Volumes/Bruce/AI%20Dev/Projects_2026/editor-main/.codex/hooks/devlog-hook.mjs), [`/Volumes/Bruce/AI Dev/Projects_2026/editor-main/packages/editor/src/lib/agent/executor.ts`](/Volumes/Bruce/AI%20Dev/Projects_2026/editor-main/packages/editor/src/lib/agent/executor.ts), [`/Volumes/Bruce/AI Dev/Projects_2026/editor-main/packages/editor/src/store/use-agent.ts`](/Volumes/Bruce/AI%20Dev/Projects_2026/editor-main/packages/editor/src/store/use-agent.ts), [`/Volumes/Bruce/AI Dev/Projects_2026/editor-main/tooling/agent-harness/run.ts`](/Volumes/Bruce/AI%20Dev/Projects_2026/editor-main/tooling/agent-harness/run.ts), [`/Volumes/Bruce/AI Dev/Projects_2026/editor-main/tooling/agent-harness/schema.ts`](/Volumes/Bruce/AI%20Dev/Projects_2026/editor-main/tooling/agent-harness/schema.ts), [`/Volumes/Bruce/AI Dev/Projects_2026/editor-main/tooling/agent-harness/cases/agent-tool-args-validation.json`](/Volumes/Bruce/AI%20Dev/Projects_2026/editor-main/tooling/agent-harness/cases/agent-tool-args-validation.json), [`/Volumes/Bruce/AI Dev/Projects_2026/editor-main/tooling/agent-harness/cases/agent-tool-gate-blocked.json`](/Volumes/Bruce/AI%20Dev/Projects_2026/editor-main/tooling/agent-harness/cases/agent-tool-gate-blocked.json), and [`/Volumes/Bruce/AI Dev/Projects_2026/editor-main/artifacts/agent-harness/.bundle/run.mjs`](/Volumes/Bruce/AI%20Dev/Projects_2026/editor-main/artifacts/agent-harness/.bundle/run.mjs).
+
 ## 2026-05-31 23:56 CST
 
 ### Completed

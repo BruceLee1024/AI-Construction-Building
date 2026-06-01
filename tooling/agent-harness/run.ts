@@ -7,9 +7,13 @@ import {
   parseAgentSceneProgress,
   buildBlockedToolResult,
   buildInvalidToolArgumentsResult,
+  buildToolReadinessFailureResult,
+  createAgentTraceEntry,
+  getAgentToolContract,
   resolveAgentRunPolicy,
   selectAgentToolsForPolicy,
   stagedDeferralForTool,
+  validateToolReadiness,
   validateToolArguments,
 } from '../../packages/editor/src/store/use-agent'
 import {
@@ -168,7 +172,7 @@ async function runCase(testCase: HarnessCase, verbose: boolean): Promise<CaseRes
 
     for (let index = 0; index < testCase.steps.length; index++) {
       const step = testCase.steps[index]!
-      const args = step.args ?? {}
+      const args = resolveStepArgs(step.args ?? {}, stepResults)
       const raw = executeHarnessStep(step.tool, args)
       const parsed = parseToolResult(raw)
       stepResults.push({ index, tool: step.tool, args, raw, parsed })
@@ -201,6 +205,28 @@ async function runCase(testCase: HarnessCase, verbose: boolean): Promise<CaseRes
       ? { error: assertions.find((assertion) => !assertion.pass)?.message }
       : {}),
   }
+}
+
+function resolveStepArgs(
+  args: Record<string, unknown>,
+  steps: StepResult[],
+): Record<string, JsonValue> {
+  const resolved: Record<string, JsonValue> = {}
+  for (const [key, value] of Object.entries(args)) {
+    resolved[key] = resolveStepArgValue(value, steps) as JsonValue
+  }
+  return resolved
+}
+
+function resolveStepArgValue(value: unknown, steps: StepResult[]): unknown {
+  if (isRecord(value) && typeof value.fromStep === 'number' && typeof value.path === 'string') {
+    return getByPath(steps[value.fromStep]?.parsed, value.path)
+  }
+  if (Array.isArray(value)) return value.map((item) => resolveStepArgValue(item, steps))
+  if (isRecord(value)) {
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, resolveStepArgValue(child, steps)]))
+  }
+  return value
 }
 
 function resetScene() {
@@ -240,6 +266,18 @@ function evaluateAssertion(
       return assertAgentToolGate(assertion)
     case 'agent.toolArgs':
       return assertAgentToolArgs(assertion)
+    case 'agent.toolArgsFromStep':
+      return assertAgentToolArgsFromStep(assertion, steps)
+    case 'agent.toolContract':
+      return assertAgentToolContract(assertion)
+    case 'agent.toolReadiness':
+      return assertAgentToolReadiness(assertion)
+    case 'toolResult.failureShape':
+      return assertToolResultFailureShape(assertion, steps)
+    case 'toolResult.candidateRefs':
+      return assertToolResultCandidateRefs(assertion, steps)
+    case 'agent.trace':
+      return assertAgentTrace(assertion, steps)
     case 'node.count':
       return assertNodeCount(assertion)
     case 'node.exists':
@@ -276,6 +314,47 @@ function executeHarnessStep(tool: string, args: Record<string, JsonValue>): stri
       String(args.userContent ?? ''),
       isRecord(args.lastValidation) ? args.lastValidation as unknown as Parameters<typeof stagedDeferralForTool>[2] : null,
     ))
+  }
+  if (tool === 'agent.invalid_json') {
+    const sceneContext = typeof args.sceneContext === 'string'
+      ? args.sceneContext
+      : isRecord(args.sceneContext)
+      ? JSON.stringify(args.sceneContext)
+      : null
+    const sceneProgress = parseAgentSceneProgress(sceneContext)
+    const policy = resolveAgentRunPolicy(String(args.userContent ?? ''), null, sceneProgress)
+    const exposure = selectAgentToolsForPolicy(policy, null)
+    return JSON.stringify({
+      success: false,
+      failureKind: 'invalid_json',
+      error: 'Invalid tool arguments JSON',
+      tool: String(args.toolName ?? ''),
+      arguments: String(args.arguments ?? ''),
+      candidateRefs: {},
+      recommendedNextTool: String(args.toolName ?? ''),
+      retryArgsHint: {},
+      agentTrace: createAgentTraceEntry(policy, exposure, 'invalid_json', String(args.toolName ?? ''), {
+        valid: false,
+        failureKind: 'invalid_json',
+        errors: ['Unexpected token'],
+      }),
+    })
+  }
+  if (tool === 'agent.tool_readiness') {
+    const userContent = String(args.userContent ?? '')
+    const lastValidation = isRecord(args.lastValidation)
+      ? args.lastValidation as unknown as Parameters<typeof resolveAgentRunPolicy>[1]
+      : null
+    const sceneContext = typeof args.sceneContext === 'string'
+      ? args.sceneContext
+      : isRecord(args.sceneContext)
+      ? JSON.stringify(args.sceneContext)
+      : executeToolCall('get_scene_info', {})
+    const sceneProgress = parseAgentSceneProgress(sceneContext)
+    const policy = resolveAgentRunPolicy(userContent, lastValidation, sceneProgress)
+    const toolArgs = isRecord(args.toolArgs) ? args.toolArgs as Record<string, unknown> : {}
+    const readiness = validateToolReadiness(String(args.toolName ?? ''), toolArgs, policy, sceneProgress, lastValidation)
+    return JSON.stringify(readiness.valid ? readiness : buildToolReadinessFailureResult(String(args.toolName ?? ''), readiness))
   }
   return executeToolCall(tool, args)
 }
@@ -483,6 +562,175 @@ function assertAgentToolArgs(
     pass: failures.length === 0,
     type: 'agent.toolArgs',
     message: failures.length === 0 ? 'agent tool arguments matched' : failures.join('; '),
+  }
+}
+
+function assertAgentToolArgsFromStep(
+  assertion: Extract<HarnessAssertion, { type: 'agent.toolArgsFromStep' }>,
+  steps: StepResult[],
+): AssertionResult {
+  const resolvedArgs: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(assertion.args)) {
+    if (isRecord(value) && typeof value.fromStep === 'number' && typeof value.path === 'string') {
+      resolvedArgs[key] = getByPath(steps[value.fromStep]?.parsed, value.path)
+    } else {
+      resolvedArgs[key] = value
+    }
+  }
+  const validation = validateToolArguments(assertion.toolName, resolvedArgs)
+  const result = validation.valid ? null : buildInvalidToolArgumentsResult(assertion.toolName, validation)
+  const failures: string[] = []
+  const expectedValid = assertion.valid ?? true
+  if (validation.valid !== expectedValid) {
+    failures.push(`valid expected ${expectedValid}, received ${validation.valid}`)
+  }
+  const errorText = [...validation.errors, ...(Array.isArray(result?.argumentErrors) ? result.argumentErrors.map(String) : [])].join('\n')
+  for (const expected of assertion.mustIncludeErrors ?? []) {
+    if (!errorText.includes(expected)) failures.push(`argument errors missing ${expected}`)
+  }
+
+  return {
+    pass: failures.length === 0,
+    type: 'agent.toolArgsFromStep',
+    message: failures.length === 0 ? 'agent tool arguments from step matched' : failures.join('; '),
+  }
+}
+
+function assertAgentToolContract(
+  assertion: Extract<HarnessAssertion, { type: 'agent.toolContract' }>,
+): AssertionResult {
+  const contract = getAgentToolContract(assertion.toolName)
+  const failures: string[] = []
+  if (!contract) failures.push(`missing contract for ${assertion.toolName}`)
+  if (contract) {
+    for (const phase of assertion.phases ?? []) {
+      if (!contract.phases.includes(phase as never)) failures.push(`contract phases missing ${phase}`)
+    }
+    if (assertion.modifiesScene !== undefined && Boolean(contract.modifiesScene) !== assertion.modifiesScene) {
+      failures.push(`modifiesScene expected ${assertion.modifiesScene}, received ${Boolean(contract.modifiesScene)}`)
+    }
+    if (assertion.fallbackOnly !== undefined && Boolean(contract.fallbackOnly) !== assertion.fallbackOnly) {
+      failures.push(`fallbackOnly expected ${assertion.fallbackOnly}, received ${Boolean(contract.fallbackOnly)}`)
+    }
+    if (assertion.requiresLayout !== undefined && Boolean(contract.requiresLayout) !== assertion.requiresLayout) {
+      failures.push(`requiresLayout expected ${assertion.requiresLayout}, received ${Boolean(contract.requiresLayout)}`)
+    }
+    if (assertion.requiresSlabId !== undefined && Boolean(contract.requiresSlabId) !== assertion.requiresSlabId) {
+      failures.push(`requiresSlabId expected ${assertion.requiresSlabId}, received ${Boolean(contract.requiresSlabId)}`)
+    }
+    if (assertion.requiresWallId !== undefined && Boolean(contract.requiresWallId) !== assertion.requiresWallId) {
+      failures.push(`requiresWallId expected ${assertion.requiresWallId}, received ${Boolean(contract.requiresWallId)}`)
+    }
+    if (assertion.requiresNonBlockingValidation !== undefined && Boolean(contract.requiresNonBlockingValidation) !== assertion.requiresNonBlockingValidation) {
+      failures.push(`requiresNonBlockingValidation expected ${assertion.requiresNonBlockingValidation}, received ${Boolean(contract.requiresNonBlockingValidation)}`)
+    }
+  }
+  return {
+    pass: failures.length === 0,
+    type: 'agent.toolContract',
+    message: failures.length === 0 ? 'agent tool contract matched' : failures.join('; '),
+  }
+}
+
+function assertAgentToolReadiness(
+  assertion: Extract<HarnessAssertion, { type: 'agent.toolReadiness' }>,
+): AssertionResult {
+  const lastValidation = isRecord(assertion.lastValidation)
+    ? assertion.lastValidation as unknown as Parameters<typeof resolveAgentRunPolicy>[1]
+    : null
+  const sceneContext = typeof assertion.sceneContext === 'string'
+    ? assertion.sceneContext
+    : isRecord(assertion.sceneContext)
+    ? JSON.stringify(assertion.sceneContext)
+    : null
+  const sceneProgress = parseAgentSceneProgress(sceneContext)
+  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress)
+  const readiness = validateToolReadiness(assertion.toolName, assertion.args as Record<string, unknown>, policy, sceneProgress, lastValidation)
+  const result = readiness.valid ? readiness : buildToolReadinessFailureResult(assertion.toolName, readiness)
+  const failures: string[] = []
+  const expectedValid = assertion.valid ?? true
+  if (readiness.valid !== expectedValid) failures.push(`valid expected ${expectedValid}, received ${readiness.valid}`)
+  if (assertion.failureKind !== undefined && readiness.failureKind !== assertion.failureKind) {
+    failures.push(`failureKind expected ${assertion.failureKind}, received ${String(readiness.failureKind)}`)
+  }
+  const missingInputs = Array.isArray(result.missingInputs) ? result.missingInputs.map(String) : []
+  for (const input of assertion.mustIncludeMissingInputs ?? []) {
+    if (!missingInputs.includes(input)) failures.push(`missingInputs missing ${input}`)
+  }
+  const candidateRefs = isRecord(result.candidateRefs) ? result.candidateRefs : {}
+  for (const key of assertion.mustIncludeCandidateRefs ?? []) {
+    if (!Array.isArray(candidateRefs[key]) || candidateRefs[key].length === 0) failures.push(`candidateRefs missing ${key}`)
+  }
+  if (assertion.recommendedNextTool !== undefined && result.recommendedNextTool !== assertion.recommendedNextTool) {
+    failures.push(`recommendedNextTool expected ${assertion.recommendedNextTool}, received ${String(result.recommendedNextTool)}`)
+  }
+  return {
+    pass: failures.length === 0,
+    type: 'agent.toolReadiness',
+    message: failures.length === 0 ? 'agent tool readiness matched' : failures.join('; '),
+  }
+}
+
+function assertToolResultFailureShape(
+  assertion: Extract<HarnessAssertion, { type: 'toolResult.failureShape' }>,
+  steps: StepResult[],
+): AssertionResult {
+  const parsed = steps[assertion.step]?.parsed
+  if (!isRecord(parsed)) return { pass: false, type: 'toolResult.failureShape', message: 'step result was not an object' }
+  const failures: string[] = []
+  if (parsed.success !== false) failures.push(`success expected false, received ${String(parsed.success)}`)
+  if (assertion.failureKind !== undefined && parsed.failureKind !== assertion.failureKind) {
+    failures.push(`failureKind expected ${assertion.failureKind}, received ${String(parsed.failureKind)}`)
+  }
+  for (const field of assertion.mustIncludeFields ?? []) {
+    if (getByPath(parsed, field) === undefined) failures.push(`missing field ${field}`)
+  }
+  return {
+    pass: failures.length === 0,
+    type: 'toolResult.failureShape',
+    message: failures.length === 0 ? 'failure shape matched' : failures.join('; '),
+  }
+}
+
+function assertToolResultCandidateRefs(
+  assertion: Extract<HarnessAssertion, { type: 'toolResult.candidateRefs' }>,
+  steps: StepResult[],
+): AssertionResult {
+  const parsed = steps[assertion.step]?.parsed
+  const candidateRefs = isRecord(parsed) && isRecord(parsed.candidateRefs) ? parsed.candidateRefs : {}
+  const failures: string[] = []
+  for (const key of assertion.mustInclude ?? []) {
+    if (!Array.isArray(candidateRefs[key]) || candidateRefs[key].length === 0) failures.push(`candidateRefs missing ${key}`)
+  }
+  return {
+    pass: failures.length === 0,
+    type: 'toolResult.candidateRefs',
+    message: failures.length === 0 ? 'candidate refs matched' : failures.join('; '),
+  }
+}
+
+function assertAgentTrace(
+  assertion: Extract<HarnessAssertion, { type: 'agent.trace' }>,
+  steps: StepResult[],
+): AssertionResult {
+  const trace = getByPath(steps[assertion.step]?.parsed, 'agentTrace')
+  if (!isRecord(trace)) return { pass: false, type: 'agent.trace', message: 'agentTrace was not an object' }
+  const failures: string[] = []
+  if (assertion.phase !== undefined && trace.phase !== assertion.phase) failures.push(`phase expected ${assertion.phase}, received ${String(trace.phase)}`)
+  if (assertion.gateDecision !== undefined && trace.gateDecision !== assertion.gateDecision) failures.push(`gateDecision expected ${assertion.gateDecision}, received ${String(trace.gateDecision)}`)
+  if (assertion.toolCall !== undefined && trace.toolCall !== assertion.toolCall) failures.push(`toolCall expected ${assertion.toolCall}, received ${String(trace.toolCall)}`)
+  const exposed = Array.isArray(trace.exposedToolNames) ? trace.exposedToolNames : []
+  for (const tool of assertion.mustIncludeExposed ?? []) {
+    if (!exposed.includes(tool)) failures.push(`exposedToolNames missing ${tool}`)
+  }
+  const hidden = Array.isArray(trace.hiddenToolNames) ? trace.hiddenToolNames : []
+  for (const tool of assertion.mustIncludeHidden ?? []) {
+    if (!hidden.includes(tool)) failures.push(`hiddenToolNames missing ${tool}`)
+  }
+  return {
+    pass: failures.length === 0,
+    type: 'agent.trace',
+    message: failures.length === 0 ? 'agent trace matched' : failures.join('; '),
   }
 }
 
