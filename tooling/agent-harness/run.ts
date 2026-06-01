@@ -3,7 +3,12 @@ import path from 'node:path'
 import useScene, { clearSceneHistory } from '@pascal-app/core'
 import type { AnyNode } from '@pascal-app/core'
 import { executeToolCall } from '../../packages/editor/src/lib/agent/executor'
-import { resolveAgentRunPolicy, stagedDeferralForTool } from '../../packages/editor/src/store/use-agent'
+import {
+  parseAgentSceneProgress,
+  resolveAgentRunPolicy,
+  selectAgentToolsForPolicy,
+  stagedDeferralForTool,
+} from '../../packages/editor/src/store/use-agent'
 import {
   assertHarnessCase,
   getByPath,
@@ -226,6 +231,8 @@ function evaluateAssertion(
       return assertAgentPolicy(assertion)
     case 'agent.deferral':
       return assertAgentDeferral(assertion)
+    case 'agent.toolExposure':
+      return assertAgentToolExposure(assertion)
     case 'node.count':
       return assertNodeCount(assertion)
     case 'node.exists':
@@ -367,6 +374,45 @@ function assertAgentDeferral(
     pass: failures.length === 0,
     type: 'agent.deferral',
     message: failures.length === 0 ? 'agent deferral matched' : failures.join('; '),
+  }
+}
+
+function assertAgentToolExposure(
+  assertion: Extract<HarnessAssertion, { type: 'agent.toolExposure' }>,
+): AssertionResult {
+  const lastValidation = isRecord(assertion.lastValidation)
+    ? assertion.lastValidation as unknown as Parameters<typeof resolveAgentRunPolicy>[1]
+    : null
+  const sceneContext = typeof assertion.sceneContext === 'string'
+    ? assertion.sceneContext
+    : isRecord(assertion.sceneContext)
+    ? JSON.stringify(assertion.sceneContext)
+    : null
+  const sceneProgress = parseAgentSceneProgress(sceneContext)
+  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress)
+  const exposure = selectAgentToolsForPolicy(policy, lastValidation)
+  const exposed = new Set(exposure.exposedToolNames)
+  const failures: string[] = []
+
+  if (assertion.phase !== undefined && policy.phase !== assertion.phase) {
+    failures.push(`phase expected ${assertion.phase}, received ${policy.phase}`)
+  }
+  if (assertion.codeProfile !== undefined && policy.codeProfile !== assertion.codeProfile) {
+    failures.push(`codeProfile expected ${assertion.codeProfile}, received ${policy.codeProfile}`)
+  }
+  for (const tool of assertion.mustExpose ?? []) {
+    if (!exposed.has(tool)) failures.push(`expected exposed tool ${tool}`)
+  }
+  for (const tool of assertion.mustHide ?? []) {
+    if (exposed.has(tool)) failures.push(`expected hidden tool ${tool}`)
+  }
+
+  return {
+    pass: failures.length === 0,
+    type: 'agent.toolExposure',
+    message: failures.length === 0
+      ? `tool exposure matched (${exposure.exposedToolNames.join(', ')})`
+      : failures.join('; '),
   }
 }
 

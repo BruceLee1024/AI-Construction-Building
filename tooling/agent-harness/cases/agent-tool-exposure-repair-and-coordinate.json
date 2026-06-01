@@ -1,0 +1,65 @@
+{
+  "name": "agent-tool-exposure-repair-and-coordinate",
+  "description": "Blocking validation narrows tools to repair hints, while raw coordinate furniture placement is exposed only for exact-coordinate requests.",
+  "steps": [
+    { "tool": "get_scene_info", "args": {} }
+  ],
+  "assertions": [
+    {
+      "type": "agent.toolExposure",
+      "userContent": "继续给住宅摆家具",
+      "sceneContext": {
+        "summary": { "walls": 4, "slabs": 1, "doors": 1, "windows": 0, "zones": 1, "roofs": 0, "items": 0, "rooms": 1 }
+      },
+      "lastValidation": {
+        "valid": false,
+        "blocking": true,
+        "fixedCount": 0,
+        "warningCount": 1,
+        "blockingRuleIds": ["room.main_space_daylight"],
+        "issues": [],
+        "repairHints": [
+          {
+            "ruleId": "room.main_space_daylight",
+            "nodeId": "slab_1",
+            "preferredTools": ["add_window_to_wall", "auto_align_windows"],
+            "suggestedAction": "Add exterior window area before furnishing."
+          }
+        ]
+      },
+      "phase": "validation_repair",
+      "mustExpose": ["get_scene_info", "validate_scene", "add_window_to_wall", "auto_align_windows", "modify_node"],
+      "mustHide": ["place_furniture", "place_furniture_solved", "suggest_furniture_layout", "create_roof"]
+    },
+    {
+      "type": "agent.toolExposure",
+      "userContent": "把 sofa 精确放到坐标 [1, 0, 2]",
+      "sceneContext": {
+        "summary": { "walls": 4, "slabs": 1, "doors": 1, "windows": 1, "zones": 1, "roofs": 0, "items": 0, "rooms": 1 },
+        "architecturalSummary": {
+          "spaces": [
+            { "slabId": "slab_1", "needsOpeningAttention": false }
+          ]
+        }
+      },
+      "phase": "furnishing",
+      "mustExpose": ["place_furniture", "place_furniture_solved", "validate_scene"],
+      "mustHide": ["create_apartment", "create_roof"]
+    },
+    {
+      "type": "agent.toolExposure",
+      "userContent": "Place furniture in the bedroom",
+      "sceneContext": {
+        "summary": { "walls": 4, "slabs": 1, "doors": 1, "windows": 1, "zones": 1, "roofs": 0, "items": 0, "rooms": 1 },
+        "architecturalSummary": {
+          "spaces": [
+            { "slabId": "slab_1", "needsOpeningAttention": false }
+          ]
+        }
+      },
+      "phase": "furnishing",
+      "mustExpose": ["suggest_furniture_layout", "place_furniture_solved"],
+      "mustHide": ["place_furniture"]
+    }
+  ]
+}

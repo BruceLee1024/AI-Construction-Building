@@ -1,0 +1,52 @@
+{
+  "name": "agent-tool-exposure-staged",
+  "description": "Agent exposes only phase-appropriate tools so the LLM cannot pick post-layout tools too early.",
+  "steps": [
+    { "tool": "get_scene_info", "args": {} }
+  ],
+  "assertions": [
+    {
+      "type": "agent.toolExposure",
+      "userContent": "创建一个符合中国住宅规则的两居户型，后续需要家具",
+      "sceneContext": {
+        "summary": { "walls": 0, "slabs": 0, "doors": 0, "windows": 0, "zones": 0, "roofs": 0, "items": 0, "rooms": 0 }
+      },
+      "codeProfile": "china_residential",
+      "phase": "layout",
+      "mustExpose": ["get_scene_info", "create_apartment", "create_room", "create_zone", "validate_scene"],
+      "mustHide": ["place_furniture", "place_furniture_solved", "suggest_furniture_layout", "create_roof"]
+    },
+    {
+      "type": "agent.toolExposure",
+      "userContent": "继续优化这个中国住宅户型",
+      "sceneContext": {
+        "summary": { "walls": 4, "slabs": 1, "doors": 0, "windows": 0, "zones": 1, "roofs": 0, "items": 0, "rooms": 1 },
+        "architecturalSummary": {
+          "spaces": [
+            { "slabId": "slab_1", "needsOpeningAttention": true }
+          ]
+        }
+      },
+      "codeProfile": "china_residential",
+      "phase": "openings",
+      "mustExpose": ["get_scene_info", "add_door_to_wall", "add_window_to_wall", "auto_align_windows", "validate_scene"],
+      "mustHide": ["place_furniture", "place_furniture_solved", "create_roof"]
+    },
+    {
+      "type": "agent.toolExposure",
+      "userContent": "给卧室摆放床和衣柜",
+      "sceneContext": {
+        "summary": { "walls": 4, "slabs": 1, "doors": 1, "windows": 1, "zones": 1, "roofs": 0, "items": 0, "rooms": 1 },
+        "architecturalSummary": {
+          "spaces": [
+            { "slabId": "slab_1", "needsOpeningAttention": false }
+          ]
+        }
+      },
+      "codeProfile": "china_residential",
+      "phase": "furnishing",
+      "mustExpose": ["get_scene_info", "suggest_furniture_layout", "place_furniture_solved", "furnish_room", "validate_scene"],
+      "mustHide": ["place_furniture", "create_apartment", "create_roof"]
+    }
+  ]
+}

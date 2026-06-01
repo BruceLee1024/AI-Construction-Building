@@ -23416,7 +23416,38 @@ function allowsRapidConcept(content) {
   const normalized = content.toLowerCase();
   return /快速|草图|概念|随便|rough|quick|draft|concept/.test(normalized);
 }
-function resolveAgentRunPolicy(userContent, lastValidation = null) {
+function wantsExactCoordinatePlacement(content) {
+  const normalized = content.toLowerCase();
+  return /坐标|精确位置|指定位置|x\s*[:=]|z\s*[:=]|\[[\d\s.,-]+,\s*[\d\s.,-]+,\s*[\d\s.,-]+\]|exact coordinate|exact position|debug/.test(normalized);
+}
+function agentToolName(tool) {
+  return tool.type === "function" ? tool.function.name : null;
+}
+function parseAgentSceneProgress(sceneContextRaw) {
+  if (!sceneContextRaw) return null;
+  try {
+    const parsed = JSON.parse(sceneContextRaw);
+    const summary = parsed.summary ?? {};
+    const rooms = Array.isArray(parsed.architecturalSummary?.spaces) ? parsed.architecturalSummary.spaces : Array.isArray(parsed.roomSummaries) ? parsed.roomSummaries : [];
+    const numberValue = (key) => Number(summary[key] ?? 0);
+    const hasLayout = numberValue("walls") > 0 || numberValue("slabs") > 0 || numberValue("rooms") > 0;
+    const hasDoors = numberValue("doors") > 0;
+    const hasWindows = numberValue("windows") > 0;
+    const hasRoomsNeedingOpenings = rooms.some((room) => room && typeof room === "object" && "needsOpeningAttention" in room && Boolean(room.needsOpeningAttention));
+    return {
+      hasLayout,
+      hasZones: numberValue("zones") > 0,
+      hasDoors,
+      hasWindows,
+      hasFurniture: numberValue("items") > 0,
+      hasRoof: numberValue("roofs") > 0,
+      hasRoomsNeedingOpenings: hasLayout && (!hasDoors || !hasWindows || hasRoomsNeedingOpenings)
+    };
+  } catch {
+    return null;
+  }
+}
+function resolveAgentRunPolicy(userContent, lastValidation = null, sceneProgress = null) {
   const normalized = userContent.toLowerCase();
   const isChineseResidential = /中文|中国|国标|住宅|公寓|户型|两居|三居|卧室|客厅|厨房|卫生间|阳台/.test(userContent);
   const isResidential = isChineseResidential || /residential|apartment|house|home|bedroom|living|kitchen|bathroom/.test(normalized);
@@ -23425,9 +23456,20 @@ function resolveAgentRunPolicy(userContent, lastValidation = null) {
   const includesRoofOrDetail = /屋顶|屋面|roof|detail|decoration|装饰/.test(normalized);
   const rapid = allowsRapidConcept(userContent);
   const isComplex = isComplexGenerationRequest(userContent);
+  const wantsExactCoordinates = wantsExactCoordinatePlacement(userContent);
   let phase = "layout";
   if (lastValidation?.blocking) {
     phase = "validation_repair";
+  } else if (isComplex && !rapid && !sceneProgress?.hasLayout) {
+    phase = "layout";
+  } else if (sceneProgress?.hasLayout && sceneProgress.hasRoomsNeedingOpenings && (isResidential || isComplex)) {
+    phase = "openings";
+  } else if (includesFurnishing && sceneProgress?.hasLayout) {
+    phase = "furnishing";
+  } else if (includesRoofOrDetail && sceneProgress?.hasLayout) {
+    phase = "roof_detail";
+  } else if (sceneProgress?.hasLayout && (isResidential || isComplex)) {
+    phase = "openings";
   } else if (isComplex && !rapid) {
     phase = "layout";
   } else if (includesRoofOrDetail) {
@@ -23440,7 +23482,17 @@ function resolveAgentRunPolicy(userContent, lastValidation = null) {
   const repairTools = ["modify_node", "move_nodes", "batch_modify_nodes", "add_door_to_wall", "add_window_to_wall", "auto_align_windows", "suggest_furniture_layout", "place_furniture_solved", "delete_node", "validate_scene"];
   const layoutTools = ["create_room", "create_apartment", "create_polygon_room", "create_l_shaped_room", "create_hallway", "create_walls", "create_slab", "create_zone", "validate_scene"];
   const openingTools = ["create_door", "create_window", "add_door_to_wall", "add_window_to_wall", "auto_align_windows", "create_zone", "validate_scene"];
-  const furnishingTools = ["suggest_furniture_layout", "place_furniture_solved", "furnish_room", "place_in_room", "place_against_wall", "place_furniture", "place_wall_item", "place_ceiling_item", "validate_scene"];
+  const furnishingTools = [
+    "suggest_furniture_layout",
+    "place_furniture_solved",
+    "furnish_room",
+    "place_in_room",
+    "place_against_wall",
+    ...wantsExactCoordinates ? ["place_furniture"] : [],
+    "place_wall_item",
+    "place_ceiling_item",
+    "validate_scene"
+  ];
   const roofTools = ["create_roof", "create_ceiling", "place_wall_item", "place_ceiling_item", "validate_scene"];
   const allowedNextTools = phase === "validation_repair" ? repairTools : phase === "furnishing" ? furnishingTools : phase === "roof_detail" ? roofTools : phase === "openings" ? [...openingTools, ...layoutTools] : layoutTools;
   return {
@@ -23451,9 +23503,36 @@ function resolveAgentRunPolicy(userContent, lastValidation = null) {
     isMultiLevel,
     includesFurnishing,
     allowsRapidConcept: rapid,
+    wantsExactCoordinates,
     allowedNextTools,
-    deferredTools: phase === "validation_repair" ? Array.from(POST_LAYOUT_TOOLS) : []
+    deferredTools: phase === "validation_repair" ? Array.from(POST_LAYOUT_TOOLS) : [],
+    sceneProgress: sceneProgress ?? void 0
   };
+}
+function selectAgentToolsForPolicy(policy, lastValidation = null) {
+  const alwaysVisible = /* @__PURE__ */ new Set(["get_scene_info", "validate_scene"]);
+  const allowed = /* @__PURE__ */ new Set([...policy.allowedNextTools, ...alwaysVisible]);
+  if (policy.phase === "validation_repair" && lastValidation?.blocking) {
+    const hintTools = /* @__PURE__ */ new Set();
+    for (const hint of lastValidation.repairHints ?? []) {
+      for (const tool of hint.preferredTools ?? []) hintTools.add(tool);
+    }
+    if (hintTools.size > 0) {
+      allowed.clear();
+      for (const tool of hintTools) allowed.add(tool);
+      for (const tool of ["modify_node", "move_nodes", "batch_modify_nodes", "delete_node"]) allowed.add(tool);
+      for (const tool of alwaysVisible) allowed.add(tool);
+    }
+  }
+  if (!policy.wantsExactCoordinates) allowed.delete("place_furniture");
+  const exposedToolNames = agentTools.map(agentToolName).filter((name) => Boolean(name && allowed.has(name)));
+  const tools = agentTools.filter((tool) => {
+    const name = agentToolName(tool);
+    return Boolean(name && allowed.has(name));
+  });
+  const hiddenCount = agentTools.length - tools.length;
+  const hiddenToolReasonSummary = hiddenCount === 0 ? "All tools are exposed for this agent turn." : `${hiddenCount} tools are hidden because the current phase is ${policy.phase}; hidden tools should be used in a later stage or after validation repair.`;
+  return { tools, exposedToolNames, hiddenToolReasonSummary };
 }
 function parseValidationSnapshot(raw) {
   try {
@@ -23567,14 +23646,26 @@ async function runAgentLoop(userContent, get, set2) {
   const MAX_ITERATIONS = 10;
   let iteration = 0;
   let lastValidation = null;
+  let lastPolicy = null;
   while (iteration < MAX_ITERATIONS) {
     iteration++;
-    const runPolicy = resolveAgentRunPolicy(userContent, lastValidation);
     const sceneContext = executeToolCall("get_scene_info", {});
+    const sceneProgress = parseAgentSceneProgress(sceneContext);
+    const runPolicy = resolveAgentRunPolicy(userContent, lastValidation, sceneProgress);
+    lastPolicy = runPolicy;
+    const toolExposure = selectAgentToolsForPolicy(runPolicy, lastValidation);
+    const toolContext = {
+      exposedToolNames: toolExposure.exposedToolNames,
+      hiddenToolReasonSummary: toolExposure.hiddenToolReasonSummary,
+      instruction: "Only call tools listed in exposedToolNames this turn. Tools not exposed are intentionally hidden for the current architectural phase."
+    };
     const systemWithContext = `${SYSTEM_PROMPT}
 
 ## Agent Run Policy
 ${JSON.stringify(runPolicy, null, 2)}
+
+## Tool Exposure
+${JSON.stringify(toolContext, null, 2)}
 
 ## Current Scene State
 ${sceneContext}`;
@@ -23588,7 +23679,7 @@ ${sceneContext}`;
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         messages: apiMessages,
-        tools: agentTools,
+        tools: toolExposure.tools,
         provider: settings.provider,
         apiKey: settings.apiKey,
         model: settings.model || void 0,
@@ -23706,7 +23797,7 @@ ${sceneContext}`;
       {
         id: genId(),
         role: "assistant",
-        content: "\u5DE5\u5177\u8C03\u7528\u5DF2\u8FBE\u5230\u672C\u8F6E\u6700\u5927\u8FED\u4EE3\u6B21\u6570\u3002\u5F53\u524D\u573A\u666F\u5DF2\u4FDD\u7559\uFF0C\u5EFA\u8BAE\u5148\u67E5\u770B\u6700\u8FD1\u4E00\u6B21 validation/tool result\uFF0C\u518D\u7EE7\u7EED\u4E0B\u4E00\u6B65\u4FEE\u590D\u6216\u751F\u6210\u3002"
+        content: `\u5DE5\u5177\u8C03\u7528\u5DF2\u8FBE\u5230\u672C\u8F6E\u6700\u5927\u8FED\u4EE3\u6B21\u6570\u3002\u5F53\u524D\u9636\u6BB5\uFF1A${lastPolicy?.phase ?? "unknown"}\uFF1B\u6700\u8FD1\u963B\u585E\u89C4\u5219\uFF1A${lastValidation?.blockingRuleIds?.join(", ") || "\u65E0"}\uFF1B\u5EFA\u8BAE\u4E0B\u4E00\u6B65\u5DE5\u5177\uFF1A${lastPolicy?.allowedNextTools.slice(0, 8).join(", ") || "get_scene_info, validate_scene"}\u3002\u5F53\u524D\u573A\u666F\u5DF2\u4FDD\u7559\uFF0C\u8BF7\u5148\u67E5\u770B\u6700\u8FD1\u4E00\u6B21 validation/tool result\uFF0C\u518D\u7EE7\u7EED\u4E0B\u4E00\u6B65\u4FEE\u590D\u6216\u751F\u6210\u3002`
       }
     ],
     isLoading: false
@@ -24029,6 +24120,8 @@ function evaluateAssertion(assertion, steps, validation) {
       return assertAgentPolicy(assertion);
     case "agent.deferral":
       return assertAgentDeferral(assertion);
+    case "agent.toolExposure":
+      return assertAgentToolExposure(assertion);
     case "node.count":
       return assertNodeCount(assertion);
     case "node.exists":
@@ -24148,6 +24241,32 @@ function assertAgentDeferral(assertion) {
     pass: failures.length === 0,
     type: "agent.deferral",
     message: failures.length === 0 ? "agent deferral matched" : failures.join("; ")
+  };
+}
+function assertAgentToolExposure(assertion) {
+  const lastValidation = isRecord(assertion.lastValidation) ? assertion.lastValidation : null;
+  const sceneContext = typeof assertion.sceneContext === "string" ? assertion.sceneContext : isRecord(assertion.sceneContext) ? JSON.stringify(assertion.sceneContext) : null;
+  const sceneProgress = parseAgentSceneProgress(sceneContext);
+  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress);
+  const exposure = selectAgentToolsForPolicy(policy, lastValidation);
+  const exposed = new Set(exposure.exposedToolNames);
+  const failures = [];
+  if (assertion.phase !== void 0 && policy.phase !== assertion.phase) {
+    failures.push(`phase expected ${assertion.phase}, received ${policy.phase}`);
+  }
+  if (assertion.codeProfile !== void 0 && policy.codeProfile !== assertion.codeProfile) {
+    failures.push(`codeProfile expected ${assertion.codeProfile}, received ${policy.codeProfile}`);
+  }
+  for (const tool of assertion.mustExpose ?? []) {
+    if (!exposed.has(tool)) failures.push(`expected exposed tool ${tool}`);
+  }
+  for (const tool of assertion.mustHide ?? []) {
+    if (exposed.has(tool)) failures.push(`expected hidden tool ${tool}`);
+  }
+  return {
+    pass: failures.length === 0,
+    type: "agent.toolExposure",
+    message: failures.length === 0 ? `tool exposure matched (${exposure.exposedToolNames.join(", ")})` : failures.join("; ")
   };
 }
 function assertNodeCount(assertion) {

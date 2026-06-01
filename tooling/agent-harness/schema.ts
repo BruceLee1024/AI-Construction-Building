@@ -52,6 +52,17 @@ export type AgentDeferralAssertion = {
   mustIncludeRuleIds?: string[]
 }
 
+export type AgentToolExposureAssertion = {
+  type: 'agent.toolExposure'
+  userContent: string
+  lastValidation?: Record<string, JsonValue>
+  sceneContext?: string | Record<string, JsonValue>
+  mustExpose?: string[]
+  mustHide?: string[]
+  phase?: string
+  codeProfile?: string
+}
+
 export type NodeCountAssertion = {
   type: 'node.count'
   nodeType: string
@@ -138,6 +149,7 @@ export type HarnessAssertion =
   | ToolResultIncludesSuggestionsAssertion
   | AgentPolicyAssertion
   | AgentDeferralAssertion
+  | AgentToolExposureAssertion
   | NodeCountAssertion
   | NodeExistsAssertion
   | ClosedWallsAssertion

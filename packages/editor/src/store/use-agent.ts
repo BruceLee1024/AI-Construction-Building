@@ -73,8 +73,26 @@ export interface AgentRunPolicy {
   isMultiLevel: boolean
   includesFurnishing: boolean
   allowsRapidConcept: boolean
+  wantsExactCoordinates: boolean
   allowedNextTools: string[]
   deferredTools: string[]
+  sceneProgress?: AgentSceneProgress
+}
+
+export interface AgentSceneProgress {
+  hasLayout: boolean
+  hasZones: boolean
+  hasDoors: boolean
+  hasWindows: boolean
+  hasFurniture: boolean
+  hasRoof: boolean
+  hasRoomsNeedingOpenings: boolean
+}
+
+export interface AgentToolExposure {
+  tools: typeof agentTools
+  exposedToolNames: string[]
+  hiddenToolReasonSummary: string
 }
 
 export type AIProvider = 'openai' | 'deepseek' | 'xiaomi'
@@ -156,9 +174,57 @@ function allowsRapidConcept(content: string): boolean {
   return /快速|草图|概念|随便|rough|quick|draft|concept/.test(normalized)
 }
 
+function wantsExactCoordinatePlacement(content: string): boolean {
+  const normalized = content.toLowerCase()
+  return /坐标|精确位置|指定位置|x\s*[:=]|z\s*[:=]|\[[\d\s.,-]+,\s*[\d\s.,-]+,\s*[\d\s.,-]+\]|exact coordinate|exact position|debug/.test(normalized)
+}
+
+function agentToolName(tool: (typeof agentTools)[number]): string | null {
+  return tool.type === 'function' ? tool.function.name : null
+}
+
+export function parseAgentSceneProgress(sceneContextRaw: string | null | undefined): AgentSceneProgress | null {
+  if (!sceneContextRaw) return null
+  try {
+    const parsed = JSON.parse(sceneContextRaw) as {
+      summary?: Record<string, unknown>
+      architecturalSummary?: { spaces?: unknown[] }
+      roomSummaries?: unknown[]
+    }
+    const summary = parsed.summary ?? {}
+    const rooms = Array.isArray(parsed.architecturalSummary?.spaces)
+      ? parsed.architecturalSummary.spaces
+      : Array.isArray(parsed.roomSummaries)
+      ? parsed.roomSummaries
+      : []
+    const numberValue = (key: string) => Number(summary[key] ?? 0)
+    const hasLayout = numberValue('walls') > 0 || numberValue('slabs') > 0 || numberValue('rooms') > 0
+    const hasDoors = numberValue('doors') > 0
+    const hasWindows = numberValue('windows') > 0
+    const hasRoomsNeedingOpenings = rooms.some((room) => (
+      room &&
+      typeof room === 'object' &&
+      'needsOpeningAttention' in room &&
+      Boolean((room as { needsOpeningAttention?: unknown }).needsOpeningAttention)
+    ))
+    return {
+      hasLayout,
+      hasZones: numberValue('zones') > 0,
+      hasDoors,
+      hasWindows,
+      hasFurniture: numberValue('items') > 0,
+      hasRoof: numberValue('roofs') > 0,
+      hasRoomsNeedingOpenings: hasLayout && (!hasDoors || !hasWindows || hasRoomsNeedingOpenings),
+    }
+  } catch {
+    return null
+  }
+}
+
 export function resolveAgentRunPolicy(
   userContent: string,
   lastValidation: ValidationSnapshot | null = null,
+  sceneProgress: AgentSceneProgress | null = null,
 ): AgentRunPolicy {
   const normalized = userContent.toLowerCase()
   const isChineseResidential = /中文|中国|国标|住宅|公寓|户型|两居|三居|卧室|客厅|厨房|卫生间|阳台/.test(userContent)
@@ -168,10 +234,21 @@ export function resolveAgentRunPolicy(
   const includesRoofOrDetail = /屋顶|屋面|roof|detail|decoration|装饰/.test(normalized)
   const rapid = allowsRapidConcept(userContent)
   const isComplex = isComplexGenerationRequest(userContent)
+  const wantsExactCoordinates = wantsExactCoordinatePlacement(userContent)
 
   let phase: AgentPhase = 'layout'
   if (lastValidation?.blocking) {
     phase = 'validation_repair'
+  } else if (isComplex && !rapid && !sceneProgress?.hasLayout) {
+    phase = 'layout'
+  } else if (sceneProgress?.hasLayout && sceneProgress.hasRoomsNeedingOpenings && (isResidential || isComplex)) {
+    phase = 'openings'
+  } else if (includesFurnishing && sceneProgress?.hasLayout) {
+    phase = 'furnishing'
+  } else if (includesRoofOrDetail && sceneProgress?.hasLayout) {
+    phase = 'roof_detail'
+  } else if (sceneProgress?.hasLayout && (isResidential || isComplex)) {
+    phase = 'openings'
   } else if (isComplex && !rapid) {
     phase = 'layout'
   } else if (includesRoofOrDetail) {
@@ -185,7 +262,17 @@ export function resolveAgentRunPolicy(
   const repairTools = ['modify_node', 'move_nodes', 'batch_modify_nodes', 'add_door_to_wall', 'add_window_to_wall', 'auto_align_windows', 'suggest_furniture_layout', 'place_furniture_solved', 'delete_node', 'validate_scene']
   const layoutTools = ['create_room', 'create_apartment', 'create_polygon_room', 'create_l_shaped_room', 'create_hallway', 'create_walls', 'create_slab', 'create_zone', 'validate_scene']
   const openingTools = ['create_door', 'create_window', 'add_door_to_wall', 'add_window_to_wall', 'auto_align_windows', 'create_zone', 'validate_scene']
-  const furnishingTools = ['suggest_furniture_layout', 'place_furniture_solved', 'furnish_room', 'place_in_room', 'place_against_wall', 'place_furniture', 'place_wall_item', 'place_ceiling_item', 'validate_scene']
+  const furnishingTools = [
+    'suggest_furniture_layout',
+    'place_furniture_solved',
+    'furnish_room',
+    'place_in_room',
+    'place_against_wall',
+    ...(wantsExactCoordinates ? ['place_furniture'] : []),
+    'place_wall_item',
+    'place_ceiling_item',
+    'validate_scene',
+  ]
   const roofTools = ['create_roof', 'create_ceiling', 'place_wall_item', 'place_ceiling_item', 'validate_scene']
 
   const allowedNextTools =
@@ -203,9 +290,49 @@ export function resolveAgentRunPolicy(
     isMultiLevel,
     includesFurnishing,
     allowsRapidConcept: rapid,
+    wantsExactCoordinates,
     allowedNextTools,
     deferredTools: phase === 'validation_repair' ? Array.from(POST_LAYOUT_TOOLS) : [],
+    sceneProgress: sceneProgress ?? undefined,
   }
+}
+
+export function selectAgentToolsForPolicy(
+  policy: AgentRunPolicy,
+  lastValidation: ValidationSnapshot | null = null,
+): AgentToolExposure {
+  const alwaysVisible = new Set(['get_scene_info', 'validate_scene'])
+  const allowed = new Set([...policy.allowedNextTools, ...alwaysVisible])
+
+  if (policy.phase === 'validation_repair' && lastValidation?.blocking) {
+    const hintTools = new Set<string>()
+    for (const hint of lastValidation.repairHints ?? []) {
+      for (const tool of hint.preferredTools ?? []) hintTools.add(tool)
+    }
+    if (hintTools.size > 0) {
+      allowed.clear()
+      for (const tool of hintTools) allowed.add(tool)
+      for (const tool of ['modify_node', 'move_nodes', 'batch_modify_nodes', 'delete_node']) allowed.add(tool)
+      for (const tool of alwaysVisible) allowed.add(tool)
+    }
+  }
+
+  if (!policy.wantsExactCoordinates) allowed.delete('place_furniture')
+
+  const exposedToolNames = agentTools
+    .map(agentToolName)
+    .filter((name): name is string => Boolean(name && allowed.has(name)))
+  const tools = agentTools.filter((tool) => {
+    const name = agentToolName(tool)
+    return Boolean(name && allowed.has(name))
+  })
+  const hiddenCount = agentTools.length - tools.length
+  const hiddenToolReasonSummary =
+    hiddenCount === 0
+      ? 'All tools are exposed for this agent turn.'
+      : `${hiddenCount} tools are hidden because the current phase is ${policy.phase}; hidden tools should be used in a later stage or after validation repair.`
+
+  return { tools, exposedToolNames, hiddenToolReasonSummary }
 }
 
 function parseValidationSnapshot(raw: string): ValidationSnapshot | null {
@@ -361,14 +488,24 @@ async function runAgentLoop(
   const MAX_ITERATIONS = 10
   let iteration = 0
   let lastValidation: ValidationSnapshot | null = null
+  let lastPolicy: AgentRunPolicy | null = null
 
   while (iteration < MAX_ITERATIONS) {
     iteration++
-    const runPolicy = resolveAgentRunPolicy(userContent, lastValidation)
 
     // Auto-inject current scene context so the AI always knows what exists
     const sceneContext = executeToolCall('get_scene_info', {})
-    const systemWithContext = `${SYSTEM_PROMPT}\n\n## Agent Run Policy\n${JSON.stringify(runPolicy, null, 2)}\n\n## Current Scene State\n${sceneContext}`
+    const sceneProgress = parseAgentSceneProgress(sceneContext)
+    const runPolicy = resolveAgentRunPolicy(userContent, lastValidation, sceneProgress)
+    lastPolicy = runPolicy
+    const toolExposure = selectAgentToolsForPolicy(runPolicy, lastValidation)
+    const toolContext = {
+      exposedToolNames: toolExposure.exposedToolNames,
+      hiddenToolReasonSummary: toolExposure.hiddenToolReasonSummary,
+      instruction:
+        'Only call tools listed in exposedToolNames this turn. Tools not exposed are intentionally hidden for the current architectural phase.',
+    }
+    const systemWithContext = `${SYSTEM_PROMPT}\n\n## Agent Run Policy\n${JSON.stringify(runPolicy, null, 2)}\n\n## Tool Exposure\n${JSON.stringify(toolContext, null, 2)}\n\n## Current Scene State\n${sceneContext}`
 
     // Build messages for API
     const apiMessages: ChatCompletionMessageParam[] = [
@@ -383,7 +520,7 @@ async function runAgentLoop(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         messages: apiMessages,
-        tools: agentTools,
+        tools: toolExposure.tools,
         provider: settings.provider,
         apiKey: settings.apiKey,
         model: settings.model || undefined,
@@ -534,7 +671,7 @@ async function runAgentLoop(
         id: genId(),
         role: 'assistant',
         content:
-          '工具调用已达到本轮最大迭代次数。当前场景已保留，建议先查看最近一次 validation/tool result，再继续下一步修复或生成。',
+          `工具调用已达到本轮最大迭代次数。当前阶段：${lastPolicy?.phase ?? 'unknown'}；最近阻塞规则：${lastValidation?.blockingRuleIds?.join(', ') || '无'}；建议下一步工具：${lastPolicy?.allowedNextTools.slice(0, 8).join(', ') || 'get_scene_info, validate_scene'}。当前场景已保留，请先查看最近一次 validation/tool result，再继续下一步修复或生成。`,
       },
     ],
     isLoading: false,
