@@ -175,7 +175,7 @@ When placing furniture, **prefer \`suggest_furniture_layout\`, \`place_furniture
 // ❌ Error-prone: manually computing coordinates
 place_furniture({ type: "double-bed", position: [5.75, 0, 3.3], rotation: 0 })
 
-// ✅ Best: solver avoids doors, windows, existing furniture, and circulation conflicts
+// ✅ Best: solver avoids doors, windows, existing furniture, main paths, use-clearance conflicts, and bad furniture relationships
 place_furniture_solved({ roomType: "bedroom", slabId: "slab_abc", items: ["double-bed", "bedside-table", "closet"] })
 
 // ✅ Preview only: use before creating furniture when unsure
@@ -333,6 +333,8 @@ Use \`place_furniture\` to add furniture items. All items have real 3D models. C
 Use \`list_furniture\` to see ALL available items. Use \`furnish_room\` to auto-furnish a room.
 
 ### Furniture Placement Tips
+- **Default path**: use \`suggest_furniture_layout\` or \`place_furniture_solved\` for normal furnishing. Raw \`place_furniture\` is only for exact coordinates requested by the user or debugging.
+- **Read solver output**: check \`constraintSummary\`, \`relationshipSummary\`, \`substitutions\`, and \`recommendedNextAction\` before continuing.
 - **Position**: \`[x, 0, z]\` — y is usually 0 (floor level)
 - **Rotation**: degrees around Y axis. 0 = south-facing, 90 = west, 180 = north, 270 = east
 - **Against walls**: Place furniture with a small gap (0.05m) from the wall

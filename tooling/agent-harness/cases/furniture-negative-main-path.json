@@ -1,0 +1,19 @@
+{
+  "name": "furniture-negative-main-path",
+  "description": "Large raw furniture placed on the door-to-room-center path should trigger furniture.blocks_main_path.",
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": { "origin": [0, 0], "width": 5, "depth": 5, "addDoor": true, "addWindows": false }
+    },
+    {
+      "tool": "place_furniture",
+      "args": { "type": "closet", "position": [2.5, 0, 1.6], "rotation": 0 }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 1 },
+    { "type": "validation", "blocking": true, "mustIncludeRuleIds": ["furniture.blocks_main_path"] },
+    { "type": "validation.repairHints", "mustIncludeRuleIds": ["furniture.blocks_main_path"], "mustIncludePreferredTools": ["place_furniture_solved"] }
+  ]
+}

@@ -30,7 +30,10 @@
   "assertions": [
     { "type": "toolResult.success", "step": 1 },
     { "type": "toolResult.success", "step": 2 },
-    { "type": "toolResult.field", "step": 1, "path": "placements.0.score", "expected": { "notNull": true } },
+    { "type": "toolResult.field", "step": 1, "path": "placements.0.finalScore", "expected": { "notNull": true } },
+    { "type": "toolResult.field", "step": 1, "path": "constraintSummary.usableArea", "expected": { "notNull": true } },
+    { "type": "toolResult.field", "step": 1, "path": "relationshipSummary.failures", "expected": [] },
+    { "type": "toolResult.field", "step": 2, "path": "recommendedNextAction", "expected": { "notNull": true } },
     { "type": "toolResult.includesSuggestions", "step": 1, "tools": ["place_furniture_solved", "validate_scene"] },
     { "type": "toolResult.field", "step": 2, "path": "rejections", "expected": { "notNull": true } },
     { "type": "node.count", "nodeType": "item", "min": 1 },

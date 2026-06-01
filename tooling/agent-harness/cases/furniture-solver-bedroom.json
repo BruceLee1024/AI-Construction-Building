@@ -20,6 +20,8 @@
   "assertions": [
     { "type": "toolResult.success", "step": 1 },
     { "type": "toolResult.field", "step": 1, "path": "placements", "expected": { "notNull": true } },
+    { "type": "toolResult.field", "step": 1, "path": "placements.0.relationshipScore", "expected": { "notNull": true } },
+    { "type": "toolResult.field", "step": 1, "path": "constraintSummary.clearPathCandidates", "expected": { "notNull": true } },
     { "type": "toolResult.field", "step": 1, "path": "rejections", "expected": { "notNull": true } },
     { "type": "node.count", "nodeType": "item", "min": 1 },
     { "type": "geometry.furnitureInsideSlabs" },

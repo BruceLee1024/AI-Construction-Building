@@ -1,0 +1,24 @@
+{
+  "name": "furniture-negative-use-clearance",
+  "description": "Raw furniture packed too closely should trigger furniture.insufficient_use_clearance.",
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": { "origin": [0, 0], "width": 6, "depth": 5, "addDoor": true, "addWindows": false }
+    },
+    {
+      "tool": "place_furniture",
+      "args": { "type": "closet", "position": [1.4, 0, 4.0], "rotation": 0 }
+    },
+    {
+      "tool": "place_furniture",
+      "args": { "type": "dresser", "position": [3.1, 0, 4.0], "rotation": 0 }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 1 },
+    { "type": "toolResult.success", "step": 2 },
+    { "type": "validation", "blocking": true, "mustIncludeRuleIds": ["furniture.insufficient_use_clearance"] },
+    { "type": "validation.repairHints", "mustIncludeRuleIds": ["furniture.insufficient_use_clearance"], "mustIncludePreferredTools": ["place_furniture_solved"] }
+  ]
+}

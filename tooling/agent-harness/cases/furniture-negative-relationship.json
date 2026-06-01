@@ -1,0 +1,24 @@
+{
+  "name": "furniture-negative-relationship",
+  "description": "A raw living room layout with sofa and TV not aligned should trigger furniture.relationship_conflict.",
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": { "origin": [0, 0], "width": 6, "depth": 5, "addDoor": true, "addWindows": true }
+    },
+    {
+      "tool": "place_furniture",
+      "args": { "type": "tv-stand", "position": [1.2, 0, 4.2], "rotation": 0 }
+    },
+    {
+      "tool": "place_furniture",
+      "args": { "type": "sofa", "position": [5.0, 0, 4.0], "rotation": 90 }
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.success", "step": 1 },
+    { "type": "toolResult.success", "step": 2 },
+    { "type": "validation", "blocking": true, "mustIncludeRuleIds": ["furniture.relationship_conflict"] },
+    { "type": "validation.repairHints", "mustIncludeRuleIds": ["furniture.relationship_conflict"], "mustIncludePreferredTools": ["suggest_furniture_layout"] }
+  ]
+}

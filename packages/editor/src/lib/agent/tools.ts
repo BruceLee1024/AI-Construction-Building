@@ -747,7 +747,7 @@ export const agentTools: ChatCompletionTool[] = [
     function: {
       name: 'suggest_furniture_layout',
       description:
-        'Solve furniture placement without creating nodes. Uses room/slab bounds, existing furniture, doors, windows, clearance zones, and room type to return feasible placements, scores, blocked zones, and structured rejection reasons. Use before placing furniture when layout quality matters.',
+        'Solve furniture placement without creating nodes. Uses shared room constraints, existing furniture, doors, windows, main circulation paths, use-clearance, and room relationship rules to return feasible placements, final scores, constraintSummary, relationshipSummary, substitutions, and structured rejection reasons. Use before placing furniture when layout quality matters.',
       parameters: {
         type: 'object',
         properties: {
@@ -793,7 +793,7 @@ export const agentTools: ChatCompletionTool[] = [
     function: {
       name: 'place_furniture_solved',
       description:
-        'Create furniture using the deterministic spatial solver. It avoids room bounds, doors, windows, existing furniture, and circulation conflicts, and returns placements plus rejection reasons. Prefer this over raw place_furniture for multi-item or code-sensitive furnishing.',
+        'Create furniture using the deterministic spatial solver. It avoids room bounds, doors, windows, existing furniture, main circulation paths, use-clearance conflicts, and bad furniture relationships. If critical furniture cannot fit, it returns structured rejections instead of creating a broken layout. Prefer this over raw place_furniture for multi-item or code-sensitive furnishing.',
       parameters: {
         type: 'object',
         properties: {

@@ -1,6 +1,14 @@
 import { useScene } from '@pascal-app/core'
 import type { AnyNode, AnyNodeId, WallNode, SlabNode, DoorNode, WindowNode, ItemNode, ZoneNode } from '@pascal-app/core'
 import { pointInPolygon, getScaledDimensions } from '@pascal-app/core'
+import {
+  type BBox2D,
+  bboxForFurniture,
+  bboxOverlaps2D,
+  buildFurnitureConstraintModel,
+  expandBBox2D,
+  polygonBounds2D,
+} from './furniture-constraints'
 
 // ============================================================================
 // TYPES
@@ -780,6 +788,7 @@ function validateFurnitureCollision(
 function validateFurnitureUseClearance(
   items: ItemNode[],
   walls: WallNode[],
+  slabs: SlabNode[],
   nodes: Record<AnyNodeId, AnyNode>,
   issues: ValidationIssue[],
   profile: CodeProfile,
@@ -812,9 +821,16 @@ function validateFurnitureUseClearance(
         issues.push({
           type: 'overlap',
           severity: 'warning',
-          ruleId: 'furniture.use_clearance',
+          ruleId: 'furniture.insufficient_use_clearance',
           nodeId: a.item.id,
           message: `Furniture "${a.item.asset.name}" does not leave enough usable clearance near "${b.item.asset.name}".`,
+        })
+        issues.push({
+          type: 'overlap',
+          severity: 'info',
+          ruleId: 'furniture.use_clearance',
+          nodeId: a.item.id,
+          message: `Furniture "${a.item.asset.name}" has a use-clearance conflict near "${b.item.asset.name}".`,
         })
       }
     }
@@ -835,6 +851,8 @@ function validateFurnitureUseClearance(
       const wz = wall.start[1] + dirZ * localX
       for (const item of floorItems) {
         const dim = getScaledDimensions(item)
+        const canSitBelowWindow = dim[1] <= 0.8 && ['tv-stand', 'coffee-table', 'stool', 'dining-chair', 'office-chair'].includes(item.asset.id)
+        if (canSitBelowWindow) continue
         const radius = Math.max(dim[0], dim[2]) / 2
         const distance = dist2D([wx, wz], [item.position[0], item.position[2]])
         if (distance < width / 2 + radius + 0.35) {
@@ -847,6 +865,89 @@ function validateFurnitureUseClearance(
           })
         }
       }
+    }
+  }
+
+  validateFurnitureMainPaths(items, walls, slabs, nodes, issues, profile)
+  validateFurnitureRelationships(items, issues)
+}
+
+function itemBBox(item: ItemNode): BBox2D {
+  const dim = getScaledDimensions(item)
+  const rotationDeg = Math.round(((item.rotation?.[1] ?? 0) * 180) / Math.PI)
+  return bboxForFurniture(item.position, dim, rotationDeg)
+}
+
+function validateFurnitureMainPaths(
+  items: ItemNode[],
+  walls: WallNode[],
+  slabs: SlabNode[],
+  nodes: Record<AnyNodeId, AnyNode>,
+  issues: ValidationIssue[],
+  profile: CodeProfile,
+): void {
+  const floorItems = items.filter(i => i.asset.attachTo !== 'wall' && i.asset.attachTo !== 'wall-side' && i.asset.attachTo !== 'ceiling')
+  for (const slab of slabs) {
+    if (slab.polygon.length < 3) continue
+    const bounds = polygonBounds2D(slab.polygon)
+    const roomItems = floorItems.filter((item) => pointInPolygon(item.position[0], item.position[2], slab.polygon))
+    const model = buildFurnitureConstraintModel({
+      polygon: slab.polygon,
+      bounds,
+      walls,
+      nodes: nodes as unknown as Record<string, unknown>,
+      pathWidth: profile.minFurnitureClearPath,
+    })
+    for (const item of roomItems) {
+      const dim = getScaledDimensions(item)
+      const isMajorBlocker = Math.max(dim[0], dim[2]) >= 0.75 &&
+        !['sofa', 'lounge-chair', 'livingroom-chair', 'tv-stand', 'coffee-table', 'stool', 'dining-chair', 'office-chair', 'floor-lamp', 'small-indoor-plant'].includes(item.asset.id)
+      if (!isMajorBlocker) continue
+      const bbox = expandBBox2D(itemBBox(item), 0.05)
+      if (model.clearPathCandidates.some((path) => bboxOverlaps2D(bbox, path))) {
+        issues.push({
+          type: 'overlap',
+          severity: 'warning',
+          ruleId: 'furniture.blocks_main_path',
+          nodeId: item.id,
+          message: `Furniture "${item.asset.name}" blocks a main circulation path from the door into the room.`,
+        })
+      }
+    }
+  }
+}
+
+function validateFurnitureRelationships(items: ItemNode[], issues: ValidationIssue[]): void {
+  const floorItems = items.filter(i => i.asset.attachTo !== 'wall' && i.asset.attachTo !== 'wall-side' && i.asset.attachTo !== 'ceiling')
+  const byCatalog = new Map(floorItems.map((item) => [item.asset.id, item]))
+  const sofa = byCatalog.get('sofa')
+  const tv = byCatalog.get('tv-stand')
+  const coffee = byCatalog.get('coffee-table')
+  if (sofa && tv) {
+    const alignedX = Math.abs(sofa.position[0] - tv.position[0]) < 1.6
+    const separatedZ = Math.abs(sofa.position[2] - tv.position[2]) > 1.4
+    if (!alignedX || !separatedZ) {
+      issues.push({
+        type: 'code',
+        severity: 'warning',
+        ruleId: 'furniture.relationship_conflict',
+        nodeId: sofa.id,
+        message: 'Living room sofa and TV stand are not arranged as a usable viewing relationship.',
+      })
+    }
+  }
+  if (sofa && tv && coffee) {
+    const betweenZ = coffee.position[2] > Math.min(sofa.position[2], tv.position[2]) &&
+      coffee.position[2] < Math.max(sofa.position[2], tv.position[2])
+    const alignedX = Math.abs(coffee.position[0] - (sofa.position[0] + tv.position[0]) / 2) < 1.3
+    if (!betweenZ || !alignedX) {
+      issues.push({
+        type: 'code',
+        severity: 'warning',
+        ruleId: 'furniture.relationship_conflict',
+        nodeId: coffee.id,
+        message: 'Coffee table should sit between the sofa and TV zone with usable access around it.',
+      })
     }
   }
 }
@@ -1521,7 +1622,7 @@ export function validateAndCorrectScene(levelId: string, codeProfile?: string): 
   detectWallGaps(walls, issues, profile)
   detectDoorWindowOverlap(walls, nodes, issues)
   validateFurnitureCollision(items, issues)
-  validateFurnitureUseClearance(items, walls, nodes, issues, profile)
+  validateFurnitureUseClearance(items, walls, slabs, nodes, issues, profile)
   validatePhysicsAndStructure(items, slabs, walls, nodes, issues)
   validateArchitectureDesign(items, slabs, walls, zones, nodes, issues, profile)
   checkCirculationAndSafety(levelId, walls, slabs, items, zones, nodes, issues, profile)
@@ -1662,6 +1763,9 @@ function repairHintForIssue(issue: ValidationIssue): RepairHint {
     case 'circulation.furniture_clear_path':
     case 'furniture.out_of_room_bounds':
     case 'furniture.use_clearance':
+    case 'furniture.blocks_main_path':
+    case 'furniture.relationship_conflict':
+    case 'furniture.insufficient_use_clearance':
     case 'furniture.blocks_window':
       return {
         ruleId: issue.ruleId,
