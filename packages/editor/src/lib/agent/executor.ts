@@ -32,6 +32,7 @@ import {
 } from './furniture-constraints'
 
 let lastValidationReport: Record<string, unknown> | null = null
+let lastValidationSceneSignature: string | null = null
 
 // Round to 3 decimal places for clean spatial feedback
 function round3(v: number): number {
@@ -61,6 +62,28 @@ function sceneDelta(createdNodeIds: string[] = [], modifiedNodeIds: string[] = [
     createdCount: createdNodeIds.length,
     modifiedCount: modifiedNodeIds.length,
   }
+}
+
+function sceneSignature(levelId: string = getLevelId()): string {
+  const { nodes } = useScene.getState()
+  const relevant = Object.values(nodes)
+    .filter((node) => isChildOfLevel(node, nodes, levelId) || node.id === levelId)
+    .map((node) => ({
+      id: node.id,
+      type: node.type,
+      parentId: node.parentId ?? null,
+      position: 'position' in node ? node.position : undefined,
+      rotation: 'rotation' in node ? node.rotation : undefined,
+      start: 'start' in node ? node.start : undefined,
+      end: 'end' in node ? node.end : undefined,
+      polygon: 'polygon' in node ? node.polygon : undefined,
+      width: 'width' in node ? node.width : undefined,
+      height: 'height' in node ? node.height : undefined,
+      metadata: 'metadata' in node ? node.metadata : undefined,
+      name: 'name' in node ? node.name : undefined,
+    }))
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+  return JSON.stringify(relevant)
 }
 
 function polygonBounds(polygon: [number, number][]): { minX: number; minZ: number; maxX: number; maxZ: number } {
@@ -161,111 +184,237 @@ export function executeToolCall(
   args: Record<string, unknown>,
 ): string {
   try {
+    let result: string
     switch (name) {
       case 'create_walls':
-        return createWalls(args)
+        result = createWalls(args)
+        break
       case 'create_slab':
-        return createSlab(args)
+        result = createSlab(args)
+        break
       case 'create_door':
-        return createDoor(args)
+        result = createDoor(args)
+        break
       case 'create_window':
-        return createWindow(args)
+        result = createWindow(args)
+        break
       case 'create_room':
-        return createRoom(args)
+        result = createRoom(args)
+        break
       case 'create_ceiling':
-        return createCeiling(args)
+        result = createCeiling(args)
+        break
       case 'create_zone':
-        return createZone(args)
+        result = createZone(args)
+        break
       case 'create_roof':
-        return createRoof(args)
+        result = createRoof(args)
+        break
       case 'create_apartment':
-        return createApartment(args)
+        result = createApartment(args)
+        break
       case 'create_l_shaped_room':
-        return createLShapedRoom(args)
+        result = createLShapedRoom(args)
+        break
       case 'modify_node':
-        return modifyNode(args)
+        result = modifyNode(args)
+        break
       case 'delete_node':
-        return deleteNode(args)
+        result = deleteNode(args)
+        break
       case 'delete_all_on_level':
-        return deleteAllOnLevel()
+        result = deleteAllOnLevel()
+        break
       case 'get_scene_info':
-        return getSceneInfo()
+        result = getSceneInfo()
+        break
       case 'undo':
-        return undoAction()
+        result = undoAction()
+        break
       case 'redo':
-        return redoAction()
+        result = redoAction()
+        break
       case 'select_node':
-        return selectNode(args)
+        result = selectNode(args)
+        break
       case 'move_nodes':
-        return moveNodes(args)
+        result = moveNodes(args)
+        break
       case 'add_door_to_wall':
-        return addDoorToWall(args)
+        result = addDoorToWall(args)
+        break
       case 'add_window_to_wall':
-        return addWindowToWall(args)
+        result = addWindowToWall(args)
+        break
       case 'batch_modify_nodes':
-        return batchModifyNodes(args)
+        result = batchModifyNodes(args)
+        break
       case 'create_polygon_room':
-        return createPolygonRoom(args)
+        result = createPolygonRoom(args)
+        break
       case 'place_furniture':
-        return placeFurniture(args)
+        result = placeFurniture(args)
+        break
       case 'suggest_furniture_layout':
-        return suggestFurnitureLayout(args)
+        result = suggestFurnitureLayout(args)
+        break
       case 'place_furniture_solved':
-        return placeFurnitureSolved(args)
+        result = placeFurnitureSolved(args)
+        break
       case 'place_in_room':
-        return placeInRoom(args)
+        result = placeInRoom(args)
+        break
       case 'place_against_wall':
-        return placeAgainstWall(args)
+        result = placeAgainstWall(args)
+        break
       case 'furnish_room':
-        return furnishRoom(args)
+        result = furnishRoom(args)
+        break
       case 'create_hallway':
-        return createHallway(args)
+        result = createHallway(args)
+        break
       case 'list_furniture':
-        return listFurniture()
+        result = listFurniture()
+        break
       case 'create_building_shell':
-        return createBuildingShell(args)
+        result = createBuildingShell(args)
+        break
       case 'create_furnished_apartment':
-        return createFurnishedApartment(args)
+        result = createFurnishedApartment(args)
+        break
       case 'mirror_room':
-        return mirrorRoom(args)
+        result = mirrorRoom(args)
+        break
       case 'add_level':
-        return addLevel(args)
+        result = addLevel(args)
+        break
       case 'switch_level':
-        return switchLevel(args)
+        result = switchLevel(args)
+        break
       case 'delete_level':
-        return deleteLevel(args)
+        result = deleteLevel(args)
+        break
       case 'rename_level':
-        return renameLevel(args)
+        result = renameLevel(args)
+        break
       case 'duplicate_level':
-        return duplicateLevel(args)
+        result = duplicateLevel(args)
+        break
       case 'list_levels':
-        return listLevels()
+        result = listLevels()
+        break
       case 'place_wall_item':
-        return placeWallItem(args)
+        result = placeWallItem(args)
+        break
       case 'place_ceiling_item':
-        return placeCeilingItem(args)
+        result = placeCeilingItem(args)
+        break
       case 'validate_scene':
-        return validateScene(args)
+        result = validateScene(args)
+        break
       case 'auto_align_windows':
-        return autoAlignWindows(args)
+        result = autoAlignWindows(args)
+        break
       case 'build_staircase':
-        return buildStaircase(args)
+        result = buildStaircase(args)
+        break
       default:
-        return JSON.stringify({
+        result = JSON.stringify({
           success: false,
+          failureKind: 'schema',
           error: `Unknown tool: ${name}`,
           tool: name,
           nextAction: 'Call get_scene_info or use one of the tools exposed in the current Agent Run Policy.',
         })
     }
+    return normalizeToolResult(name, result)
   } catch (err: unknown) {
-    return JSON.stringify({
+    return normalizeToolResult(name, JSON.stringify({
       success: false,
+      failureKind: 'schema',
       error: String(err),
       tool: name,
       nextAction: 'Inspect the error, then retry with valid arguments or choose a safer staged tool.',
-    })
+    }))
   }
+}
+
+function normalizeToolResult(toolName: string, rawResult: string): string {
+  try {
+    const parsed = JSON.parse(rawResult)
+    if (!isRecordLike(parsed)) {
+      return JSON.stringify(defaultToolEnvelope(toolName, false, { rawResult }))
+    }
+    const success = parsed.success === undefined ? !parsed.error : parsed.success === true
+    const createdNodeIds = Array.isArray(parsed.createdNodeIds)
+      ? compactIds(parsed.createdNodeIds)
+      : compactIds([
+          parsed.nodeId,
+          parsed.wallId,
+          parsed.slabId,
+          parsed.doorId,
+          parsed.windowId,
+          parsed.itemId,
+          ...(Array.isArray(parsed.createdIds) ? parsed.createdIds : []),
+        ])
+    const modifiedNodeIds = Array.isArray(parsed.modifiedNodeIds)
+      ? compactIds(parsed.modifiedNodeIds)
+      : compactIds([
+          parsed.modifiedNodeId,
+          parsed.nodeId && parsed.updatedFields ? parsed.nodeId : undefined,
+          ...(Array.isArray(parsed.nodeIds) && parsed.tool === 'move_nodes' ? parsed.nodeIds : []),
+        ])
+    return JSON.stringify({
+      ...defaultToolEnvelope(toolName, success, { createdNodeIds, modifiedNodeIds }),
+      ...parsed,
+      success,
+      tool: typeof parsed.tool === 'string' ? parsed.tool : toolName,
+      failureKind: success ? parsed.failureKind : parsed.failureKind ?? 'schema',
+      createdNodeIds,
+      modifiedNodeIds,
+      sceneDelta: isRecordLike(parsed.sceneDelta) ? parsed.sceneDelta : sceneDelta(createdNodeIds, modifiedNodeIds),
+      candidateRefs: isRecordLike(parsed.candidateRefs) ? parsed.candidateRefs : {},
+      suggestedNextTools: Array.isArray(parsed.suggestedNextTools) ? parsed.suggestedNextTools : defaultSuggestedNextTools(toolName, success),
+      nextAction: typeof parsed.nextAction === 'string' ? parsed.nextAction : defaultNextAction(toolName, success),
+    })
+  } catch {
+    return JSON.stringify(defaultToolEnvelope(toolName, false, { rawResult }))
+  }
+}
+
+function defaultToolEnvelope(
+  toolName: string,
+  success: boolean,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const createdNodeIds = Array.isArray(extra.createdNodeIds) ? compactIds(extra.createdNodeIds) : []
+  const modifiedNodeIds = Array.isArray(extra.modifiedNodeIds) ? compactIds(extra.modifiedNodeIds) : []
+  return {
+    success,
+    tool: toolName,
+    failureKind: success ? undefined : 'schema',
+    createdNodeIds,
+    modifiedNodeIds,
+    sceneDelta: sceneDelta(createdNodeIds, modifiedNodeIds),
+    candidateRefs: {},
+    suggestedNextTools: defaultSuggestedNextTools(toolName, success),
+    nextAction: defaultNextAction(toolName, success),
+    ...extra,
+  }
+}
+
+function defaultSuggestedNextTools(toolName: string, success: boolean): string[] {
+  if (!success) return ['get_scene_info']
+  if (toolName === 'validate_scene') return ['get_scene_info']
+  if (toolName.includes('window') || toolName.includes('door')) return ['validate_scene']
+  if (toolName.includes('furniture') || toolName === 'furnish_room') return ['validate_scene', 'suggest_furniture_layout']
+  return ['validate_scene', 'get_scene_info']
+}
+
+function defaultNextAction(toolName: string, success: boolean): string {
+  if (!success) return 'Inspect failureKind, candidateRefs, and retry with valid arguments.'
+  if (toolName === 'get_scene_info') return 'Use agentNextActions and candidateArgs to choose the next exposed tool.'
+  return 'Validate the scene or continue with the next exposed tool.'
 }
 
 function createWalls(args: Record<string, unknown>): string {
@@ -980,6 +1129,8 @@ function deleteAllOnLevel(): string {
 function getSceneInfo(): string {
   const { nodes } = useScene.getState()
   const levelId = getLevelId()
+  const currentSceneSignature = sceneSignature(levelId)
+  const validationIsCurrent = Boolean(lastValidationReport && lastValidationSceneSignature === currentSceneSignature)
 
   const walls: Array<{ id: string; start: unknown; end: unknown; height?: unknown; thickness?: unknown; length: number }> = []
   const slabs: Array<{ id: string; vertexCount: number }> = []
@@ -1185,7 +1336,9 @@ function getSceneInfo(): string {
   const agentNextActions = {
     primary: roomSummaries.length === 0
       ? 'create_layout'
-      : lastValidationReport && lastValidationReport.blocking
+      : lastValidationReport && !validationIsCurrent
+      ? 'validate_scene'
+      : validationIsCurrent && lastValidationReport && lastValidationReport.blocking
       ? 'repair_validation'
       : roomSummaries.some((room) => room.doorCount === 0 || windowCountNeedsAttention(room.roomType, room.windowCount))
       ? 'add_openings'
@@ -1195,10 +1348,19 @@ function getSceneInfo(): string {
     alternatives: roomSummaries.length === 0
       ? ['create_room', 'create_apartment', 'create_polygon_room']
       : ['validate_scene', 'add_door_to_wall', 'add_window_to_wall', 'suggest_furniture_layout'],
-    blockedBy: lastValidationReport && lastValidationReport.blocking
+    blockedBy: validationIsCurrent && lastValidationReport && lastValidationReport.blocking
       ? {
           blockingRuleIds: lastValidationReport.blockingRuleIds,
           repairHints: lastValidationReport.repairHints,
+        }
+      : null,
+    validationState: lastValidationReport
+      ? {
+          current: validationIsCurrent,
+          stale: !validationIsCurrent,
+          nextAction: validationIsCurrent
+            ? 'Use the current validation result.'
+            : 'Scene changed after the last validation; run validate_scene before treating prior blocking rules as active.',
         }
       : null,
     candidateArgs: {
@@ -1244,6 +1406,11 @@ function getSceneInfo(): string {
           blockingRuleIds: lastValidationReport.blockingRuleIds,
           ruleSummary: lastValidationReport.ruleSummary,
           repairHints: lastValidationReport.repairHints,
+          current: validationIsCurrent,
+          stale: !validationIsCurrent,
+          nextAction: validationIsCurrent
+            ? 'Use this validation result for staging decisions.'
+            : 'This validation is stale because the scene changed; call validate_scene again.',
         }
       : null,
     roomSummaries,
@@ -3686,8 +3853,10 @@ function validateScene(args: Record<string, unknown> = {}): string {
   const report = formatValidationReport(result)
   try {
     lastValidationReport = JSON.parse(report) as Record<string, unknown>
+    lastValidationSceneSignature = sceneSignature(levelId)
   } catch {
     lastValidationReport = null
+    lastValidationSceneSignature = null
   }
   return report
 }

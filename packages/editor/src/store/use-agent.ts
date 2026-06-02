@@ -174,6 +174,30 @@ const AGENT_TOOL_CONTRACTS: Record<string, AgentToolContract> = {
     requiresNodeId: true,
     recoveryAction: 'Delete only a known problematic node from repairHints/candidateRefs.',
   },
+  delete_all_on_level: {
+    name: 'delete_all_on_level',
+    phases: ['layout'],
+    modifiesScene: true,
+    highRisk: true,
+    fallbackOnly: true,
+    recoveryAction: 'Only clear a level when the user explicitly asks to reset/delete the current level.',
+  },
+  undo: {
+    name: 'undo',
+    phases: ['diagnostic', 'layout', 'openings', 'validation_repair', 'furnishing', 'roof_detail'],
+    recoveryAction: 'Undo the latest scene edit only when the user explicitly requests rollback.',
+  },
+  redo: {
+    name: 'redo',
+    phases: ['diagnostic', 'layout', 'openings', 'validation_repair', 'furnishing', 'roof_detail'],
+    recoveryAction: 'Redo the latest undone scene edit only when the user explicitly requests it.',
+  },
+  select_node: {
+    name: 'select_node',
+    phases: ['diagnostic'],
+    requiresNodeId: true,
+    recoveryAction: 'Use candidate node IDs from get_scene_info before selecting.',
+  },
   suggest_furniture_layout: {
     name: 'suggest_furniture_layout',
     phases: ['furnishing', 'validation_repair'],
@@ -202,6 +226,11 @@ const AGENT_TOOL_CONTRACTS: Record<string, AgentToolContract> = {
     requiresNonBlockingValidation: true,
     recommendedTool: 'place_furniture_solved',
     recoveryAction: 'Prefer place_furniture_solved for deterministic layout; furnish_room remains semantic convenience.',
+  },
+  list_furniture: {
+    name: 'list_furniture',
+    phases: ['diagnostic', 'furnishing'],
+    recoveryAction: 'Inspect available furniture IDs before choosing solver furnitureItems.',
   },
   place_in_room: {
     name: 'place_in_room',
@@ -300,6 +329,36 @@ const AGENT_TOOL_CONTRACTS: Record<string, AgentToolContract> = {
     highRisk: true,
     recoveryAction: 'Use only when start/end level IDs are known.',
   },
+  add_level: {
+    name: 'add_level',
+    phases: ['layout'],
+    modifiesScene: true,
+    recoveryAction: 'Use only for explicit multi-level requests; validate each level after layout edits.',
+  },
+  switch_level: {
+    name: 'switch_level',
+    phases: ['diagnostic', 'layout', 'openings', 'validation_repair', 'furnishing', 'roof_detail'],
+    recoveryAction: 'Switch levels only when the target level ID/name is known from list_levels or get_scene_info.',
+  },
+  delete_level: {
+    name: 'delete_level',
+    phases: ['layout'],
+    modifiesScene: true,
+    highRisk: true,
+    fallbackOnly: true,
+    recoveryAction: 'Delete a level only when the user explicitly requests it and the level ID is known.',
+  },
+  rename_level: {
+    name: 'rename_level',
+    phases: ['layout'],
+    modifiesScene: true,
+    recoveryAction: 'Rename a known level when the user explicitly asks for level naming.',
+  },
+  list_levels: {
+    name: 'list_levels',
+    phases: ['diagnostic', 'layout'],
+    recoveryAction: 'Inspect level IDs before switching, duplicating, deleting, or stair generation.',
+  },
 }
 
 export interface ValidationSnapshot {
@@ -319,6 +378,8 @@ export interface ValidationSnapshot {
   ruleSummary?: Record<string, number>
   blockingRuleIds?: string[]
   repairHints?: RepairHint[]
+  current?: boolean
+  stale?: boolean
 }
 
 export interface RepairHint {
@@ -341,6 +402,9 @@ export interface AgentRunPolicy {
   allowedNextTools: string[]
   deferredTools: string[]
   sceneProgress?: AgentSceneProgress
+  validationState?: AgentValidationState
+  agentNextAction?: string
+  policySource?: string
 }
 
 export interface AgentSceneProgress {
@@ -358,6 +422,7 @@ export interface AgentToolExposure {
   exposedToolNames: string[]
   hiddenToolNames: string[]
   hiddenToolReasonSummary: string
+  hiddenToolReasonByCategory: Record<string, number>
   toolDecisionCards: AgentToolDecisionCard[]
 }
 
@@ -398,6 +463,7 @@ export interface AgentToolReadinessResult {
   recommendedTool?: string
   recommendedNextTool?: string
   retryArgsHint?: Record<string, unknown>
+  recoveryPlan?: AgentRecoveryPlan
 }
 
 export interface AgentToolDecisionCard {
@@ -406,6 +472,10 @@ export interface AgentToolDecisionCard {
   requiredArguments: string[]
   prerequisites: string[]
   candidateRefs?: CandidateRefs
+  candidateArgs?: Record<string, unknown>
+  whenToUse: string
+  doNotUseWhen: string[]
+  requiresValidationState?: 'current_non_blocking' | 'current_blocking' | 'any'
   nextAction: string
 }
 
@@ -418,6 +488,29 @@ export interface AgentTraceEntry {
   gateDecision: 'exposed' | 'blocked' | 'deferred' | 'invalid_arguments' | 'executed' | 'invalid_json'
   readinessFailure?: AgentToolReadinessResult
   validationBlockingRuleIds?: string[]
+  sceneValidationState?: AgentValidationState
+  policySource?: string
+  hiddenToolReasonByCategory?: Record<string, number>
+  recoveryPlan?: AgentRecoveryPlan
+  selectedCandidateArgs?: Record<string, unknown>
+  sceneProgress?: AgentSceneProgress
+}
+
+export interface AgentValidationState {
+  current: boolean
+  stale: boolean
+  blocking: boolean
+  blockingRuleIds: string[]
+  nextAction?: string
+}
+
+export interface AgentRecoveryPlan {
+  failureKind: ToolFailureKind
+  rootCause: string
+  recommendedTool: string
+  retryArgs: Record<string, unknown>
+  candidateRefs: CandidateRefs
+  mustValidateAfter: boolean
 }
 
 export type AIProvider = 'openai' | 'deepseek' | 'xiaomi'
@@ -518,11 +611,16 @@ export function getAgentToolContract(toolName: string): AgentToolContract | null
 
 export function listAgentToolContracts(): AgentToolContract[] {
   const names = new Set(agentTools.map(agentToolName).filter((name): name is string => Boolean(name)))
-  return Array.from(names).map((name) => AGENT_TOOL_CONTRACTS[name] ?? {
-    name,
-    phases: ['diagnostic'],
-    recoveryAction: 'No explicit contract yet; use only when exposed by policy and schema arguments are complete.',
-  })
+  return Array.from(names)
+    .map((name) => AGENT_TOOL_CONTRACTS[name])
+    .filter((contract): contract is AgentToolContract => Boolean(contract))
+}
+
+export function findAgentToolsMissingContracts(): string[] {
+  return agentTools
+    .map(agentToolName)
+    .filter((name): name is string => Boolean(name))
+    .filter((name) => !AGENT_TOOL_CONTRACTS[name])
 }
 
 export function validateToolArguments(
@@ -599,17 +697,33 @@ export function buildInvalidToolArgumentsResult(
   validation: ToolArgumentValidationResult,
 ): Record<string, unknown> {
   const candidateRefs = collectCandidateRefs()
+  const failureKind = classifyArgumentFailure(validation.errors)
+  const recommendedNextTool = recommendedNextToolForInvalidArgs(toolName, validation.errors)
+  const retryArgsHint = retryArgsHintForTool(toolName, candidateRefs)
+  const recoveryPlan = buildAgentRecoveryPlan({
+    toolName,
+    failureKind,
+    errors: validation.errors,
+    recommendedTool: recommendedNextTool,
+    candidateRefs,
+    retryArgs: retryArgsHint,
+  })
   return {
     success: false,
-    failureKind: classifyArgumentFailure(validation.errors),
+    failureKind,
     error: 'Invalid tool arguments',
     tool: toolName,
+    createdNodeIds: [],
+    modifiedNodeIds: [],
+    sceneDelta: { createdNodeIds: [], modifiedNodeIds: [], createdCount: 0, modifiedCount: 0 },
     argumentErrors: validation.errors,
     requiredArguments: validation.required ?? [],
     missingInputs: missingInputsForErrors(validation.errors),
     candidateRefs,
-    recommendedNextTool: recommendedNextToolForInvalidArgs(toolName, validation.errors),
-    retryArgsHint: retryArgsHintForTool(toolName, candidateRefs),
+    recommendedNextTool,
+    retryArgsHint,
+    recoveryPlan,
+    suggestedNextTools: [recommendedNextTool],
     nextAction:
       'Retry the same exposed tool with complete arguments that match its schema, or call get_scene_info if required IDs are missing.',
   }
@@ -656,6 +770,35 @@ function retryArgsHintForTool(toolName: string, candidateRefs: CandidateRefs): R
     hint.roomType = roomType ?? 'living'
   }
   return hint
+}
+
+function buildAgentRecoveryPlan(params: {
+  toolName: string
+  failureKind: ToolFailureKind
+  errors?: string[]
+  recommendedTool?: string
+  candidateRefs?: CandidateRefs
+  retryArgs?: Record<string, unknown>
+  mustValidateAfter?: boolean
+}): AgentRecoveryPlan {
+  const candidateRefs = params.candidateRefs ?? collectCandidateRefs()
+  const recommendedTool = params.recommendedTool ?? recommendedNextToolForInvalidArgs(params.toolName, params.errors ?? [])
+  const retryArgs = params.retryArgs ?? retryArgsHintForTool(recommendedTool, candidateRefs)
+  const rootCause = (() => {
+    if (params.errors?.length) return params.errors.join('; ')
+    if (params.failureKind === 'phase') return `${params.toolName} is hidden in the current agent phase`
+    if (params.failureKind === 'invalid_json') return `${params.toolName} arguments were not valid JSON`
+    if (params.failureKind === 'blocked_validation') return 'current validation is blocking post-layout work'
+    return `${params.toolName} is not ready to execute`
+  })()
+  return {
+    failureKind: params.failureKind,
+    rootCause,
+    recommendedTool,
+    retryArgs,
+    candidateRefs,
+    mustValidateAfter: params.mustValidateAfter ?? true,
+  }
 }
 
 type JsonSchemaLike = {
@@ -798,7 +941,65 @@ function collectCandidateRefs(sceneContext: Record<string, unknown> | null = get
     }))
     .filter((node) => node.id)
 
+  if ((refs.slabs?.length ?? 0) === 0 || (refs.walls?.length ?? 0) === 0) {
+    const fallbackContext = sceneContext ? getSceneContextSnapshot() : null
+    if (fallbackContext && fallbackContext !== sceneContext) {
+      const fallbackRefs = collectCandidateRefs(fallbackContext)
+      return {
+        slabs: refs.slabs?.length ? refs.slabs : fallbackRefs.slabs,
+        walls: refs.walls?.length ? refs.walls : fallbackRefs.walls,
+        nodes: refs.nodes?.length ? refs.nodes : fallbackRefs.nodes,
+      }
+    }
+  }
+
   return refs
+}
+
+function parseValidationSnapshotFromSceneContext(sceneContext: Record<string, unknown> | null): ValidationSnapshot | null {
+  const raw = isPlainObject(sceneContext?.lastValidation) ? sceneContext.lastValidation : null
+  if (!raw) return null
+  return normalizeValidationSnapshot(raw as Partial<ValidationSnapshot>)
+}
+
+function normalizeValidationSnapshot(raw: Partial<ValidationSnapshot>): ValidationSnapshot {
+  return {
+    valid: Boolean(raw.valid),
+    blocking: Boolean(raw.blocking),
+    fixedCount: raw.fixedCount ?? 0,
+    warningCount: raw.warningCount ?? 0,
+    issues: Array.isArray(raw.issues) ? raw.issues : [],
+    nextAction: raw.nextAction,
+    issueSummary: raw.issueSummary,
+    ruleSummary: raw.ruleSummary,
+    blockingRuleIds: Array.isArray(raw.blockingRuleIds) ? raw.blockingRuleIds : [],
+    repairHints: Array.isArray(raw.repairHints) ? raw.repairHints : [],
+    current: raw.current,
+    stale: raw.stale,
+  }
+}
+
+function chooseCurrentValidationSnapshot(
+  localValidation: ValidationSnapshot | null,
+  sceneValidation: ValidationSnapshot | null,
+): ValidationSnapshot | null {
+  if (sceneValidation?.current) return sceneValidation
+  if (localValidation?.current) return localValidation
+  if (localValidation && !localValidation.stale) return localValidation
+  return sceneValidation ?? localValidation
+}
+
+function validationStateFromSnapshot(snapshot: ValidationSnapshot | null): AgentValidationState | undefined {
+  if (!snapshot) return undefined
+  const current = snapshot.current !== false && snapshot.stale !== true
+  const stale = snapshot.stale === true || snapshot.current === false
+  return {
+    current,
+    stale,
+    blocking: Boolean(snapshot.blocking),
+    blockingRuleIds: snapshot.blockingRuleIds ?? [],
+    nextAction: snapshot.nextAction,
+  }
 }
 
 function hasCandidateRefs(refs: CandidateRefs | undefined): boolean {
@@ -880,6 +1081,7 @@ export function resolveAgentRunPolicy(
   userContent: string,
   lastValidation: ValidationSnapshot | null = null,
   sceneProgress: AgentSceneProgress | null = null,
+  sceneContext: Record<string, unknown> | null = null,
 ): AgentRunPolicy {
   const normalized = userContent.toLowerCase()
   const isChineseResidential = /中文|中国|国标|住宅|公寓|户型|两居|三居|卧室|客厅|厨房|卫生间|阳台/.test(userContent)
@@ -890,12 +1092,17 @@ export function resolveAgentRunPolicy(
   const rapid = allowsRapidConcept(userContent)
   const isComplex = isComplexGenerationRequest(userContent)
   const wantsExactCoordinates = wantsExactCoordinatePlacement(userContent)
+  const validationState = validationStateFromSnapshot(lastValidation)
+  const hasCurrentBlockingValidation = Boolean(validationState?.current && validationState.blocking)
+  const agentNextAction = readAgentNextAction(sceneContext)
 
   let phase: AgentPhase = 'layout'
-  if (lastValidation?.blocking) {
-    phase = 'validation_repair'
-  } else if (isComplex && !rapid && !sceneProgress?.hasLayout) {
+  if (sceneProgress && !sceneProgress.hasLayout) {
     phase = 'layout'
+  } else if (hasCurrentBlockingValidation) {
+    phase = 'validation_repair'
+  } else if (agentNextAction === 'validate_scene' && validationState?.stale) {
+    phase = sceneProgress?.hasLayout && includesFurnishing ? 'furnishing' : 'openings'
   } else if (sceneProgress?.hasLayout && sceneProgress.hasRoomsNeedingOpenings && (isResidential || isComplex)) {
     phase = 'openings'
   } else if (includesFurnishing && sceneProgress?.hasLayout) {
@@ -928,20 +1135,31 @@ export function resolveAgentRunPolicy(
     allowedNextTools,
     deferredTools: phase === 'validation_repair' ? Array.from(POST_LAYOUT_TOOLS) : [],
     sceneProgress: sceneProgress ?? undefined,
+    validationState,
+    agentNextAction,
+    policySource: 'user_intent+scene_progress+scene_validation',
   }
+}
+
+function readAgentNextAction(sceneContext: Record<string, unknown> | null): string | undefined {
+  const agentNextActions = isPlainObject(sceneContext?.agentNextActions) ? sceneContext.agentNextActions : null
+  return typeof agentNextActions?.primary === 'string' ? agentNextActions.primary : undefined
 }
 
 export function selectAgentToolsForPolicy(
   policy: AgentRunPolicy,
   lastValidation: ValidationSnapshot | null = null,
+  sceneContext: Record<string, unknown> | null = null,
 ): AgentToolExposure {
   const alwaysVisible = new Set(['get_scene_info', 'validate_scene'])
   const allowed = new Set([...policy.allowedNextTools, ...alwaysVisible])
 
-  if (policy.phase === 'validation_repair' && lastValidation?.blocking) {
+  if (policy.phase === 'validation_repair' && lastValidation?.blocking && !lastValidation.stale) {
     const hintTools = new Set<string>()
     for (const hint of lastValidation.repairHints ?? []) {
-      for (const tool of hint.preferredTools ?? []) hintTools.add(tool)
+      for (const tool of hint.preferredTools ?? []) {
+        if (getAgentToolContract(tool)) hintTools.add(tool)
+      }
     }
     if (hintTools.size > 0) {
       allowed.clear()
@@ -967,25 +1185,45 @@ export function selectAgentToolsForPolicy(
     hiddenCount === 0
       ? 'All tools are exposed for this agent turn.'
       : `${hiddenCount} tools are hidden because the current phase is ${policy.phase}; hidden tools should be used in a later stage or after validation repair.`
+  const hiddenToolReasonByCategory = summarizeHiddenToolReasons(hiddenToolNames, policy)
 
   return {
     tools,
     exposedToolNames,
     hiddenToolNames,
     hiddenToolReasonSummary,
-    toolDecisionCards: buildToolDecisionCards(exposedToolNames, policy, lastValidation),
+    hiddenToolReasonByCategory,
+    toolDecisionCards: buildToolDecisionCards(exposedToolNames, policy, lastValidation, sceneContext),
   }
+}
+
+function summarizeHiddenToolReasons(toolNames: string[], policy: AgentRunPolicy): Record<string, number> {
+  const summary: Record<string, number> = {}
+  for (const toolName of toolNames) {
+    const contract = getAgentToolContract(toolName)
+    const category = !contract
+      ? 'missing_contract'
+      : contract.fallbackOnly && !policy.wantsExactCoordinates
+      ? 'fallback_only'
+      : !toolContractPhaseMatches(contract, policy.phase)
+      ? 'phase_mismatch'
+      : 'filtered'
+    summary[category] = (summary[category] ?? 0) + 1
+  }
+  return summary
 }
 
 function buildToolDecisionCards(
   toolNames: string[],
   policy: AgentRunPolicy,
   lastValidation: ValidationSnapshot | null,
+  sceneContext: Record<string, unknown> | null = null,
 ): AgentToolDecisionCard[] {
-  const candidateRefs = collectCandidateRefs()
+  const candidateRefs = collectCandidateRefs(sceneContext ?? undefined)
+  const candidateArgs = collectCandidateArgs(sceneContext)
   return toolNames
     .filter((tool) => tool !== 'get_scene_info')
-    .slice(0, 12)
+    .slice(0, 8)
     .map((tool) => {
       const contract = getAgentToolContract(tool)
       const readinessCandidateRefs: CandidateRefs = {}
@@ -1006,9 +1244,42 @@ function buildToolDecisionCards(
         requiredArguments: schemaRequired,
         prerequisites,
         ...(hasCandidateRefs(readinessCandidateRefs) ? { candidateRefs: readinessCandidateRefs } : {}),
+        ...(candidateArgs[tool] ? { candidateArgs: candidateArgs[tool] } : {}),
+        whenToUse: contract?.recoveryAction ?? 'Use when this tool is exposed and all required IDs are known.',
+        doNotUseWhen: doNotUseWhenForTool(tool, contract, policy),
+        requiresValidationState: contract?.requiresNonBlockingValidation
+          ? 'current_non_blocking'
+          : policy.phase === 'validation_repair'
+          ? 'current_blocking'
+          : 'any',
         nextAction: nextActionForTool(tool, contract, policy, lastValidation),
       }
     })
+}
+
+function collectCandidateArgs(sceneContext: Record<string, unknown> | null): Record<string, Record<string, unknown>> {
+  const agentNextActions = isPlainObject(sceneContext?.agentNextActions) ? sceneContext.agentNextActions : null
+  const raw = isPlainObject(agentNextActions?.candidateArgs) ? agentNextActions.candidateArgs : {}
+  const result: Record<string, Record<string, unknown>> = {}
+  for (const [tool, args] of Object.entries(raw)) {
+    if (isPlainObject(args)) result[tool] = args
+  }
+  return result
+}
+
+function doNotUseWhenForTool(
+  toolName: string,
+  contract: AgentToolContract | null,
+  policy: AgentRunPolicy,
+): string[] {
+  const reasons: string[] = []
+  if (contract?.fallbackOnly && !policy.wantsExactCoordinates) reasons.push('fallback_only_without_exact_coordinates')
+  if (contract?.requiresNonBlockingValidation) reasons.push('validation_blocking_or_stale')
+  if (toolName === 'place_furniture') reasons.push('solver_tools_are_available')
+  if (policy.phase === 'openings' && ['place_furniture_solved', 'suggest_furniture_layout', 'furnish_room'].includes(toolName)) {
+    reasons.push('openings_not_complete')
+  }
+  return reasons
 }
 
 function requiredArgumentsForTool(toolName: string): string[] {
@@ -1024,7 +1295,7 @@ function nextActionForTool(
   policy: AgentRunPolicy,
   lastValidation: ValidationSnapshot | null,
 ): string {
-  if (policy.phase === 'validation_repair' && lastValidation?.blocking) {
+  if (policy.phase === 'validation_repair' && lastValidation?.blocking && !lastValidation.stale) {
     return `Fix blocking rules (${(lastValidation.blockingRuleIds ?? []).join(', ') || 'unknown'}), then run validate_scene.`
   }
   if (contract?.recoveryAction) return contract.recoveryAction
@@ -1037,23 +1308,38 @@ export function buildBlockedToolResult(
   policy: AgentRunPolicy,
   exposure: Pick<AgentToolExposure, 'exposedToolNames' | 'hiddenToolReasonSummary'>,
   lastValidation: ValidationSnapshot | null = null,
+  sceneContext: Record<string, unknown> | null = null,
 ): Record<string, unknown> {
   const contract = getAgentToolContract(toolName)
-  const candidateRefs = collectCandidateRefs()
+  const candidateRefs = collectCandidateRefs(sceneContext ?? undefined)
+  const recommendedNextTool = contract?.recommendedTool ?? exposure.exposedToolNames[0] ?? 'get_scene_info'
+  const retryArgsHint = retryArgsHintForTool(recommendedNextTool, candidateRefs)
+  const recoveryPlan = buildAgentRecoveryPlan({
+    toolName,
+    failureKind: 'phase',
+    recommendedTool: recommendedNextTool,
+    candidateRefs,
+    retryArgs: retryArgsHint,
+  })
   return {
     success: false,
     failureKind: 'phase',
     blocked: true,
     tool: toolName,
+    createdNodeIds: [],
+    modifiedNodeIds: [],
+    sceneDelta: { createdNodeIds: [], modifiedNodeIds: [], createdCount: 0, modifiedCount: 0 },
     phaseBlockedBy: policy.phase,
     reason: `Tool ${toolName} is not exposed in the current agent phase.`,
     hiddenToolReasonSummary: exposure.hiddenToolReasonSummary,
     allowedNextTools: exposure.exposedToolNames,
     requiredRuleFixes: lastValidation?.blockingRuleIds ?? [],
-    repairHints: lastValidation?.blocking ? (lastValidation.repairHints ?? []).slice(0, 5) : [],
+    repairHints: lastValidation?.blocking && !lastValidation.stale ? (lastValidation.repairHints ?? []).slice(0, 5) : [],
     candidateRefs,
-    recommendedNextTool: contract?.recommendedTool ?? exposure.exposedToolNames[0] ?? 'get_scene_info',
-    retryArgsHint: retryArgsHintForTool(contract?.recommendedTool ?? exposure.exposedToolNames[0] ?? toolName, candidateRefs),
+    recommendedNextTool,
+    retryArgsHint,
+    recoveryPlan,
+    suggestedNextTools: exposure.exposedToolNames.slice(0, 8),
     nextAction:
       'Choose one of allowedNextTools for this turn. If the intended tool is hidden, complete the current validation/staging phase first.',
   }
@@ -1064,16 +1350,31 @@ export function buildInvalidJsonToolResult(
   rawArguments: string,
   message: string,
 ): Record<string, unknown> {
+  const candidateRefs = collectCandidateRefs()
+  const recoveryPlan = buildAgentRecoveryPlan({
+    toolName,
+    failureKind: 'invalid_json',
+    errors: [message],
+    recommendedTool: toolName,
+    candidateRefs,
+    retryArgs: {},
+    mustValidateAfter: false,
+  })
   return {
     success: false,
     failureKind: 'invalid_json',
     error: 'Invalid tool arguments JSON',
     tool: toolName,
+    createdNodeIds: [],
+    modifiedNodeIds: [],
+    sceneDelta: { createdNodeIds: [], modifiedNodeIds: [], createdCount: 0, modifiedCount: 0 },
     arguments: rawArguments,
     message,
-    candidateRefs: collectCandidateRefs(),
+    candidateRefs,
     recommendedNextTool: toolName,
     retryArgsHint: {},
+    recoveryPlan,
+    suggestedNextTools: [toolName],
     nextAction: 'Call the same exposed tool again with complete valid JSON arguments that match the tool schema.',
   }
 }
@@ -1081,24 +1382,20 @@ export function buildInvalidJsonToolResult(
 function parseValidationSnapshot(raw: string): ValidationSnapshot | null {
   try {
     const parsed = JSON.parse(raw) as Partial<ValidationSnapshot>
-    return {
-      valid: Boolean(parsed.valid),
+    return normalizeValidationSnapshot({
+      ...parsed,
       blocking: Boolean(parsed.blocking ?? ((parsed.warningCount ?? 0) > 0)),
-      fixedCount: parsed.fixedCount ?? 0,
-      warningCount: parsed.warningCount ?? 0,
-      issues: Array.isArray(parsed.issues) ? parsed.issues : [],
-      nextAction: parsed.nextAction,
-      issueSummary: parsed.issueSummary,
-      ruleSummary: parsed.ruleSummary,
-      blockingRuleIds: parsed.blockingRuleIds,
-      repairHints: Array.isArray(parsed.repairHints) ? parsed.repairHints : [],
-    }
+    })
   } catch {
     return null
   }
 }
 
-function buildValidationMessage(snapshot: ValidationSnapshot, policy: AgentRunPolicy): string {
+function buildValidationMessage(
+  snapshot: ValidationSnapshot,
+  policy: AgentRunPolicy,
+  sceneContext: Record<string, unknown> | null = null,
+): string {
   const payload = {
     type: 'spatial_validation',
     codeProfile: policy.codeProfile,
@@ -1112,7 +1409,7 @@ function buildValidationMessage(snapshot: ValidationSnapshot, policy: AgentRunPo
     repairHints: (snapshot.repairHints ?? []).slice(0, 8),
     allowedNextTools: snapshot.blocking ? policy.allowedNextTools : undefined,
     toolDecisionCards: snapshot.blocking
-      ? buildToolDecisionCards(policy.allowedNextTools, policy, snapshot).slice(0, 8)
+      ? buildToolDecisionCards(policy.allowedNextTools, policy, snapshot, sceneContext).slice(0, 8)
       : undefined,
     nextAction: snapshot.nextAction ?? (snapshot.blocking
       ? 'Use repairHints with the allowed repair tools, then validate again before furniture/roof/detail work.'
@@ -1145,12 +1442,19 @@ export function stagedDeferralForTool(
     }
   }
 
-  if (lastValidation?.blocking && POST_LAYOUT_TOOLS.has(toolName)) {
+  if (lastValidation?.blocking && !lastValidation.stale && POST_LAYOUT_TOOLS.has(toolName)) {
+    const repairPolicy = resolveAgentRunPolicy(userContent, lastValidation, policy.sceneProgress ?? null)
+    const repairExposure = selectAgentToolsForPolicy(repairPolicy, lastValidation)
+    const contract = getAgentToolContract(toolName)
+    const allowedNextTools = Array.from(new Set([
+      ...repairExposure.exposedToolNames,
+      ...(contract?.recommendedTool ? [contract.recommendedTool] : []),
+    ]))
     return {
       deferred: true,
       tool: toolName,
-      phaseBlockedBy: 'validation_repair',
-      allowedNextTools: policy.allowedNextTools,
+      phaseBlockedBy: repairPolicy.phase,
+      allowedNextTools,
       requiredRuleFixes: lastValidation.blockingRuleIds ?? [],
       repairHints: (lastValidation.repairHints ?? []).slice(0, 5),
       reason:
@@ -1178,21 +1482,34 @@ export function validateToolReadiness(
   policy: AgentRunPolicy,
   sceneProgress: AgentSceneProgress | null = policy.sceneProgress ?? null,
   lastValidation: ValidationSnapshot | null = null,
+  sceneContext: Record<string, unknown> | null = null,
 ): AgentToolReadinessResult {
-  const candidateRefs = collectCandidateRefs()
+  const candidateRefs = collectCandidateRefs(sceneContext ?? undefined)
   const contract = getAgentToolContract(toolName)
   const schemaValidation = validateToolArguments(toolName, args)
   if (!schemaValidation.valid) {
+    const failureKind = classifyArgumentFailure(schemaValidation.errors)
+    const recommendedTool = recommendedNextToolForInvalidArgs(toolName, schemaValidation.errors)
+    const retryArgsHint = retryArgsHintForTool(toolName, candidateRefs)
+    const recoveryPlan = buildAgentRecoveryPlan({
+      toolName,
+      failureKind,
+      errors: schemaValidation.errors,
+      recommendedTool,
+      candidateRefs,
+      retryArgs: retryArgsHint,
+    })
     return {
       valid: false,
-      failureKind: classifyArgumentFailure(schemaValidation.errors),
+      failureKind,
       errors: schemaValidation.errors,
       required: schemaValidation.required,
       missingInputs: missingInputsForErrors(schemaValidation.errors),
       candidateRefs,
-      recommendedTool: recommendedNextToolForInvalidArgs(toolName, schemaValidation.errors),
-      recommendedNextTool: recommendedNextToolForInvalidArgs(toolName, schemaValidation.errors),
-      retryArgsHint: retryArgsHintForTool(toolName, candidateRefs),
+      recommendedTool,
+      recommendedNextTool: recommendedTool,
+      retryArgsHint,
+      recoveryPlan,
     }
   }
 
@@ -1217,24 +1534,37 @@ export function validateToolReadiness(
   if (
     contract?.requiresNonBlockingValidation &&
     lastValidation?.blocking &&
+    !lastValidation.stale &&
     policy.phase !== 'validation_repair'
   ) {
     errors.push('non-blocking validation is required before this post-layout tool can run')
   }
 
   if (errors.length > 0) {
+    const failureKind = lastValidation?.blocking && !lastValidation.stale && contract?.requiresNonBlockingValidation
+      ? 'blocked_validation'
+      : 'missing_scene_prerequisite'
+    const recommendedTool = contract?.recommendedTool ?? (missingInputs.includes('layout') ? 'create_room' : 'get_scene_info')
+    const retryArgsHint = retryArgsHintForTool(toolName, candidateRefs)
+    const recoveryPlan = buildAgentRecoveryPlan({
+      toolName,
+      failureKind,
+      errors,
+      recommendedTool,
+      candidateRefs,
+      retryArgs: retryArgsHint,
+    })
     return {
       valid: false,
-      failureKind: lastValidation?.blocking && contract?.requiresNonBlockingValidation
-        ? 'blocked_validation'
-        : 'missing_scene_prerequisite',
+      failureKind,
       errors,
       required: requiredArgumentsForTool(toolName),
       missingInputs,
       candidateRefs,
-      recommendedTool: contract?.recommendedTool ?? (missingInputs.includes('layout') ? 'create_room' : 'get_scene_info'),
-      recommendedNextTool: contract?.recommendedTool ?? (missingInputs.includes('layout') ? 'create_room' : 'get_scene_info'),
-      retryArgsHint: retryArgsHintForTool(toolName, candidateRefs),
+      recommendedTool,
+      recommendedNextTool: recommendedTool,
+      retryArgsHint,
+      recoveryPlan,
     }
   }
 
@@ -1260,18 +1590,34 @@ export function buildToolReadinessFailureResult(
   toolName: string,
   readiness: AgentToolReadinessResult,
 ): Record<string, unknown> {
+  const candidateRefs = readiness.candidateRefs ?? collectCandidateRefs()
+  const recommendedNextTool = readiness.recommendedNextTool ?? readiness.recommendedTool ?? 'get_scene_info'
+  const retryArgsHint = readiness.retryArgsHint ?? retryArgsHintForTool(recommendedNextTool, candidateRefs)
+  const recoveryPlan = readiness.recoveryPlan ?? buildAgentRecoveryPlan({
+    toolName,
+    failureKind: readiness.failureKind ?? 'missing_scene_prerequisite',
+    errors: readiness.errors,
+    recommendedTool: recommendedNextTool,
+    candidateRefs,
+    retryArgs: retryArgsHint,
+  })
   return {
     success: false,
     failureKind: readiness.failureKind ?? 'missing_scene_prerequisite',
     error: 'Tool is not ready to execute',
     tool: toolName,
+    createdNodeIds: [],
+    modifiedNodeIds: [],
+    sceneDelta: { createdNodeIds: [], modifiedNodeIds: [], createdCount: 0, modifiedCount: 0 },
     argumentErrors: readiness.errors,
     requiredArguments: readiness.required ?? [],
     missingInputs: readiness.missingInputs ?? [],
-    candidateRefs: readiness.candidateRefs ?? collectCandidateRefs(),
+    candidateRefs,
     recommendedTool: readiness.recommendedTool,
-    recommendedNextTool: readiness.recommendedNextTool ?? readiness.recommendedTool ?? 'get_scene_info',
-    retryArgsHint: readiness.retryArgsHint ?? {},
+    recommendedNextTool,
+    retryArgsHint,
+    recoveryPlan,
+    suggestedNextTools: [recommendedNextTool],
     nextAction: 'Use candidateRefs and retryArgsHint to call the recommended tool or retry this tool with complete IDs.',
   }
 }
@@ -1284,6 +1630,7 @@ export function createAgentTraceEntry(
   readinessFailure?: AgentToolReadinessResult,
   lastValidation: ValidationSnapshot | null = null,
 ): AgentTraceEntry {
+  const selectedCard = toolCall ? exposure.toolDecisionCards.find((card) => card.tool === toolCall) : undefined
   return {
     phase: policy.phase,
     codeProfile: policy.codeProfile,
@@ -1293,6 +1640,12 @@ export function createAgentTraceEntry(
     gateDecision,
     ...(readinessFailure && !readinessFailure.valid ? { readinessFailure } : {}),
     validationBlockingRuleIds: lastValidation?.blockingRuleIds ?? [],
+    sceneValidationState: policy.validationState,
+    policySource: policy.policySource,
+    hiddenToolReasonByCategory: exposure.hiddenToolReasonByCategory,
+    recoveryPlan: readinessFailure?.recoveryPlan,
+    selectedCandidateArgs: selectedCard?.candidateArgs,
+    sceneProgress: policy.sceneProgress,
   }
 }
 
@@ -1375,20 +1728,28 @@ async function runAgentLoop(
   let iteration = 0
   let lastValidation: ValidationSnapshot | null = null
   let lastPolicy: AgentRunPolicy | null = null
+  let lastGateDecision: AgentTraceEntry['gateDecision'] | null = null
+  let lastRecommendedTools: string[] = []
+  let lastRecoveryPlan: AgentRecoveryPlan | null = null
 
   while (iteration < MAX_ITERATIONS) {
     iteration++
 
     // Auto-inject current scene context so the AI always knows what exists
     const sceneContext = executeToolCall('get_scene_info', {})
+    const sceneContextParsed = parseSceneContext(sceneContext)
+    const sceneValidation = parseValidationSnapshotFromSceneContext(sceneContextParsed)
+    lastValidation = chooseCurrentValidationSnapshot(lastValidation, sceneValidation)
     const sceneProgress = parseAgentSceneProgress(sceneContext)
-    const runPolicy = resolveAgentRunPolicy(userContent, lastValidation, sceneProgress)
+    const runPolicy = resolveAgentRunPolicy(userContent, lastValidation, sceneProgress, sceneContextParsed)
     lastPolicy = runPolicy
-    const toolExposure = selectAgentToolsForPolicy(runPolicy, lastValidation)
+    const toolExposure = selectAgentToolsForPolicy(runPolicy, lastValidation, sceneContextParsed)
+    lastRecommendedTools = toolExposure.exposedToolNames
     const toolContext = {
       exposedToolNames: toolExposure.exposedToolNames,
       hiddenToolNames: toolExposure.hiddenToolNames,
       hiddenToolReasonSummary: toolExposure.hiddenToolReasonSummary,
+      hiddenToolReasonByCategory: toolExposure.hiddenToolReasonByCategory,
       toolDecisionCards: toolExposure.toolDecisionCards,
       instruction:
         'Only call tools listed in exposedToolNames this turn. Use toolDecisionCards for required IDs, candidateRefs, and next action. Tools not exposed are intentionally hidden for the current architectural phase.',
@@ -1459,13 +1820,17 @@ async function runAgentLoop(
         try {
           toolArgs = tc.arguments.trim() ? JSON.parse(tc.arguments) : {}
         } catch (err) {
+          lastGateDecision = 'invalid_json'
+          const invalidJsonResult = buildInvalidJsonToolResult(tc.name, tc.arguments, err instanceof Error ? err.message : String(err))
+          lastRecoveryPlan = isPlainObject(invalidJsonResult.recoveryPlan) ? invalidJsonResult.recoveryPlan as unknown as AgentRecoveryPlan : null
           result = JSON.stringify({
-            ...buildInvalidJsonToolResult(tc.name, tc.arguments, err instanceof Error ? err.message : String(err)),
+            ...invalidJsonResult,
             agentTrace: createAgentTraceEntry(runPolicy, toolExposure, 'invalid_json', tc.name, {
               valid: false,
               failureKind: 'invalid_json',
               errors: [err instanceof Error ? err.message : String(err)],
               candidateRefs: collectCandidateRefs(),
+              recoveryPlan: lastRecoveryPlan ?? undefined,
             }, lastValidation),
           })
 
@@ -1485,20 +1850,27 @@ async function runAgentLoop(
           ? stagedDeferralForTool(tc.name, userContent, lastValidation, runPolicy)
           : null
         const readiness = isExposedTool
-          ? validateToolReadiness(tc.name, toolArgs, runPolicy, sceneProgress, lastValidation)
+          ? validateToolReadiness(tc.name, toolArgs, runPolicy, sceneProgress, lastValidation, sceneContextParsed)
           : null
 
         if (!isExposedTool) {
+          lastGateDecision = 'blocked'
+          const blockedResult = buildBlockedToolResult(tc.name, runPolicy, toolExposure, lastValidation, sceneContextParsed)
+          lastRecoveryPlan = isPlainObject(blockedResult.recoveryPlan) ? blockedResult.recoveryPlan as unknown as AgentRecoveryPlan : null
           result = JSON.stringify({
-            ...buildBlockedToolResult(tc.name, runPolicy, toolExposure, lastValidation),
+            ...blockedResult,
             agentTrace: createAgentTraceEntry(runPolicy, toolExposure, 'blocked', tc.name, undefined, lastValidation),
           })
         } else if (readiness && !readiness.valid) {
+          lastGateDecision = 'invalid_arguments'
+          lastRecoveryPlan = readiness.recoveryPlan ?? null
           result = JSON.stringify({
             ...buildToolReadinessFailureResult(tc.name, readiness),
             agentTrace: createAgentTraceEntry(runPolicy, toolExposure, 'invalid_arguments', tc.name, readiness, lastValidation),
           })
         } else if (stagedDeferral) {
+          lastGateDecision = 'deferred'
+          lastRecoveryPlan = null
           result = JSON.stringify({
             ...stagedDeferral,
             agentTrace: createAgentTraceEntry(runPolicy, toolExposure, 'deferred', tc.name, undefined, lastValidation),
@@ -1507,6 +1879,8 @@ async function runAgentLoop(
           isSceneModifyingTool &&
           sceneModificationCount >= MAX_SCENE_MODIFYING_TOOLS_PER_ITERATION
         ) {
+          lastGateDecision = 'deferred'
+          lastRecoveryPlan = null
           result = JSON.stringify({
             success: false,
             failureKind: 'phase',
@@ -1522,6 +1896,8 @@ async function runAgentLoop(
           })
         } else {
           const rawResult = executeToolCall(tc.name, toolArgs)
+          lastGateDecision = 'executed'
+          lastRecoveryPlan = null
           result = appendAgentTraceToToolResult(rawResult, createAgentTraceEntry(runPolicy, toolExposure, 'executed', tc.name, undefined, lastValidation))
           if (isSceneModifyingTool) {
             hasSceneModification = true
@@ -1546,12 +1922,18 @@ async function runAgentLoop(
         const validationResult = executeToolCall('validate_scene', { codeProfile: runPolicy.codeProfile })
         const snapshot = parseValidationSnapshot(validationResult)
         if (snapshot) {
-          lastValidation = snapshot
-          const nextSceneProgress = parseAgentSceneProgress(executeToolCall('get_scene_info', {}))
+          lastValidation = normalizeValidationSnapshot({ ...snapshot, current: true, stale: false })
+          const nextSceneContext = executeToolCall('get_scene_info', {})
+          const nextSceneContextParsed = parseSceneContext(nextSceneContext)
+          const nextSceneProgress = parseAgentSceneProgress(nextSceneContext)
           const validationMsg: ChatMessage = {
             id: genId(),
             role: 'system',
-            content: buildValidationMessage(snapshot, resolveAgentRunPolicy(userContent, snapshot, nextSceneProgress)),
+            content: buildValidationMessage(
+              snapshot,
+              resolveAgentRunPolicy(userContent, snapshot, nextSceneProgress, nextSceneContextParsed),
+              nextSceneContextParsed,
+            ),
           }
           set((s) => ({
             messages: [...s.messages, validationMsg],
@@ -1583,7 +1965,7 @@ async function runAgentLoop(
         id: genId(),
         role: 'assistant',
         content:
-          `工具调用已达到本轮最大迭代次数。当前阶段：${lastPolicy?.phase ?? 'unknown'}；最近阻塞规则：${lastValidation?.blockingRuleIds?.join(', ') || '无'}；建议下一步工具：${lastPolicy?.allowedNextTools.slice(0, 8).join(', ') || 'get_scene_info, validate_scene'}。当前场景已保留，请先查看最近一次 validation/tool result，再继续下一步修复或生成。`,
+          `工具调用已达到本轮最大迭代次数。当前阶段：${lastPolicy?.phase ?? 'unknown'}；validation：${lastPolicy?.validationState ? JSON.stringify(lastPolicy.validationState) : 'unknown'}；最近 gateDecision：${lastGateDecision ?? 'unknown'}；最近 recoveryPlan：${lastRecoveryPlan ? JSON.stringify(lastRecoveryPlan) : '无'}；最近阻塞规则：${lastValidation?.blockingRuleIds?.join(', ') || '无'}；建议下一步工具：${lastRecommendedTools.slice(0, 8).join(', ') || lastPolicy?.allowedNextTools.slice(0, 8).join(', ') || 'get_scene_info, validate_scene'}。当前场景已保留，请先查看最近一次 validation/tool result，再继续下一步修复或生成。`,
       },
     ],
     isLoading: false,

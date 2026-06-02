@@ -18330,6 +18330,7 @@ function repairHintForIssue(issue2) {
 
 // packages/editor/src/lib/agent/executor.ts
 var lastValidationReport = null;
+var lastValidationSceneSignature = null;
 function round32(v) {
   return Math.round(v * 1e3) / 1e3;
 }
@@ -18351,6 +18352,24 @@ function sceneDelta(createdNodeIds = [], modifiedNodeIds = []) {
     createdCount: createdNodeIds.length,
     modifiedCount: modifiedNodeIds.length
   };
+}
+function sceneSignature(levelId = getLevelId()) {
+  const { nodes } = use_scene_default.getState();
+  const relevant = Object.values(nodes).filter((node) => isChildOfLevel(node, nodes, levelId) || node.id === levelId).map((node) => ({
+    id: node.id,
+    type: node.type,
+    parentId: node.parentId ?? null,
+    position: "position" in node ? node.position : void 0,
+    rotation: "rotation" in node ? node.rotation : void 0,
+    start: "start" in node ? node.start : void 0,
+    end: "end" in node ? node.end : void 0,
+    polygon: "polygon" in node ? node.polygon : void 0,
+    width: "width" in node ? node.width : void 0,
+    height: "height" in node ? node.height : void 0,
+    metadata: "metadata" in node ? node.metadata : void 0,
+    name: "name" in node ? node.name : void 0
+  })).sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  return JSON.stringify(relevant);
 }
 function polygonBounds2(polygon) {
   const xs = polygon.map((p) => p[0]);
@@ -18390,111 +18409,225 @@ function getLevelId() {
 }
 function executeToolCall(name, args) {
   try {
+    let result;
     switch (name) {
       case "create_walls":
-        return createWalls(args);
+        result = createWalls(args);
+        break;
       case "create_slab":
-        return createSlab(args);
+        result = createSlab(args);
+        break;
       case "create_door":
-        return createDoor(args);
+        result = createDoor(args);
+        break;
       case "create_window":
-        return createWindow(args);
+        result = createWindow(args);
+        break;
       case "create_room":
-        return createRoom(args);
+        result = createRoom(args);
+        break;
       case "create_ceiling":
-        return createCeiling(args);
+        result = createCeiling(args);
+        break;
       case "create_zone":
-        return createZone(args);
+        result = createZone(args);
+        break;
       case "create_roof":
-        return createRoof(args);
+        result = createRoof(args);
+        break;
       case "create_apartment":
-        return createApartment(args);
+        result = createApartment(args);
+        break;
       case "create_l_shaped_room":
-        return createLShapedRoom(args);
+        result = createLShapedRoom(args);
+        break;
       case "modify_node":
-        return modifyNode(args);
+        result = modifyNode(args);
+        break;
       case "delete_node":
-        return deleteNode(args);
+        result = deleteNode(args);
+        break;
       case "delete_all_on_level":
-        return deleteAllOnLevel();
+        result = deleteAllOnLevel();
+        break;
       case "get_scene_info":
-        return getSceneInfo();
+        result = getSceneInfo();
+        break;
       case "undo":
-        return undoAction();
+        result = undoAction();
+        break;
       case "redo":
-        return redoAction();
+        result = redoAction();
+        break;
       case "select_node":
-        return selectNode(args);
+        result = selectNode(args);
+        break;
       case "move_nodes":
-        return moveNodes(args);
+        result = moveNodes(args);
+        break;
       case "add_door_to_wall":
-        return addDoorToWall(args);
+        result = addDoorToWall(args);
+        break;
       case "add_window_to_wall":
-        return addWindowToWall(args);
+        result = addWindowToWall(args);
+        break;
       case "batch_modify_nodes":
-        return batchModifyNodes(args);
+        result = batchModifyNodes(args);
+        break;
       case "create_polygon_room":
-        return createPolygonRoom(args);
+        result = createPolygonRoom(args);
+        break;
       case "place_furniture":
-        return placeFurniture(args);
+        result = placeFurniture(args);
+        break;
       case "suggest_furniture_layout":
-        return suggestFurnitureLayout(args);
+        result = suggestFurnitureLayout(args);
+        break;
       case "place_furniture_solved":
-        return placeFurnitureSolved(args);
+        result = placeFurnitureSolved(args);
+        break;
       case "place_in_room":
-        return placeInRoom(args);
+        result = placeInRoom(args);
+        break;
       case "place_against_wall":
-        return placeAgainstWall(args);
+        result = placeAgainstWall(args);
+        break;
       case "furnish_room":
-        return furnishRoom(args);
+        result = furnishRoom(args);
+        break;
       case "create_hallway":
-        return createHallway(args);
+        result = createHallway(args);
+        break;
       case "list_furniture":
-        return listFurniture();
+        result = listFurniture();
+        break;
       case "create_building_shell":
-        return createBuildingShell(args);
+        result = createBuildingShell(args);
+        break;
       case "create_furnished_apartment":
-        return createFurnishedApartment(args);
+        result = createFurnishedApartment(args);
+        break;
       case "mirror_room":
-        return mirrorRoom(args);
+        result = mirrorRoom(args);
+        break;
       case "add_level":
-        return addLevel(args);
+        result = addLevel(args);
+        break;
       case "switch_level":
-        return switchLevel(args);
+        result = switchLevel(args);
+        break;
       case "delete_level":
-        return deleteLevel(args);
+        result = deleteLevel(args);
+        break;
       case "rename_level":
-        return renameLevel(args);
+        result = renameLevel(args);
+        break;
       case "duplicate_level":
-        return duplicateLevel(args);
+        result = duplicateLevel(args);
+        break;
       case "list_levels":
-        return listLevels();
+        result = listLevels();
+        break;
       case "place_wall_item":
-        return placeWallItem(args);
+        result = placeWallItem(args);
+        break;
       case "place_ceiling_item":
-        return placeCeilingItem(args);
+        result = placeCeilingItem(args);
+        break;
       case "validate_scene":
-        return validateScene(args);
+        result = validateScene(args);
+        break;
       case "auto_align_windows":
-        return autoAlignWindows(args);
+        result = autoAlignWindows(args);
+        break;
       case "build_staircase":
-        return buildStaircase(args);
+        result = buildStaircase(args);
+        break;
       default:
-        return JSON.stringify({
+        result = JSON.stringify({
           success: false,
+          failureKind: "schema",
           error: `Unknown tool: ${name}`,
           tool: name,
           nextAction: "Call get_scene_info or use one of the tools exposed in the current Agent Run Policy."
         });
     }
+    return normalizeToolResult(name, result);
   } catch (err) {
-    return JSON.stringify({
+    return normalizeToolResult(name, JSON.stringify({
       success: false,
+      failureKind: "schema",
       error: String(err),
       tool: name,
       nextAction: "Inspect the error, then retry with valid arguments or choose a safer staged tool."
-    });
+    }));
   }
+}
+function normalizeToolResult(toolName, rawResult) {
+  try {
+    const parsed = JSON.parse(rawResult);
+    if (!isRecordLike(parsed)) {
+      return JSON.stringify(defaultToolEnvelope(toolName, false, { rawResult }));
+    }
+    const success2 = parsed.success === void 0 ? !parsed.error : parsed.success === true;
+    const createdNodeIds = Array.isArray(parsed.createdNodeIds) ? compactIds(parsed.createdNodeIds) : compactIds([
+      parsed.nodeId,
+      parsed.wallId,
+      parsed.slabId,
+      parsed.doorId,
+      parsed.windowId,
+      parsed.itemId,
+      ...Array.isArray(parsed.createdIds) ? parsed.createdIds : []
+    ]);
+    const modifiedNodeIds = Array.isArray(parsed.modifiedNodeIds) ? compactIds(parsed.modifiedNodeIds) : compactIds([
+      parsed.modifiedNodeId,
+      parsed.nodeId && parsed.updatedFields ? parsed.nodeId : void 0,
+      ...Array.isArray(parsed.nodeIds) && parsed.tool === "move_nodes" ? parsed.nodeIds : []
+    ]);
+    return JSON.stringify({
+      ...defaultToolEnvelope(toolName, success2, { createdNodeIds, modifiedNodeIds }),
+      ...parsed,
+      success: success2,
+      tool: typeof parsed.tool === "string" ? parsed.tool : toolName,
+      failureKind: success2 ? parsed.failureKind : parsed.failureKind ?? "schema",
+      createdNodeIds,
+      modifiedNodeIds,
+      sceneDelta: isRecordLike(parsed.sceneDelta) ? parsed.sceneDelta : sceneDelta(createdNodeIds, modifiedNodeIds),
+      candidateRefs: isRecordLike(parsed.candidateRefs) ? parsed.candidateRefs : {},
+      suggestedNextTools: Array.isArray(parsed.suggestedNextTools) ? parsed.suggestedNextTools : defaultSuggestedNextTools(toolName, success2),
+      nextAction: typeof parsed.nextAction === "string" ? parsed.nextAction : defaultNextAction(toolName, success2)
+    });
+  } catch {
+    return JSON.stringify(defaultToolEnvelope(toolName, false, { rawResult }));
+  }
+}
+function defaultToolEnvelope(toolName, success2, extra = {}) {
+  const createdNodeIds = Array.isArray(extra.createdNodeIds) ? compactIds(extra.createdNodeIds) : [];
+  const modifiedNodeIds = Array.isArray(extra.modifiedNodeIds) ? compactIds(extra.modifiedNodeIds) : [];
+  return {
+    success: success2,
+    tool: toolName,
+    failureKind: success2 ? void 0 : "schema",
+    createdNodeIds,
+    modifiedNodeIds,
+    sceneDelta: sceneDelta(createdNodeIds, modifiedNodeIds),
+    candidateRefs: {},
+    suggestedNextTools: defaultSuggestedNextTools(toolName, success2),
+    nextAction: defaultNextAction(toolName, success2),
+    ...extra
+  };
+}
+function defaultSuggestedNextTools(toolName, success2) {
+  if (!success2) return ["get_scene_info"];
+  if (toolName === "validate_scene") return ["get_scene_info"];
+  if (toolName.includes("window") || toolName.includes("door")) return ["validate_scene"];
+  if (toolName.includes("furniture") || toolName === "furnish_room") return ["validate_scene", "suggest_furniture_layout"];
+  return ["validate_scene", "get_scene_info"];
+}
+function defaultNextAction(toolName, success2) {
+  if (!success2) return "Inspect failureKind, candidateRefs, and retry with valid arguments.";
+  if (toolName === "get_scene_info") return "Use agentNextActions and candidateArgs to choose the next exposed tool.";
+  return "Validate the scene or continue with the next exposed tool.";
 }
 function createWalls(args) {
   const levelId = getLevelId();
@@ -19087,6 +19220,8 @@ function deleteAllOnLevel() {
 function getSceneInfo() {
   const { nodes } = use_scene_default.getState();
   const levelId = getLevelId();
+  const currentSceneSignature = sceneSignature(levelId);
+  const validationIsCurrent = Boolean(lastValidationReport && lastValidationSceneSignature === currentSceneSignature);
   const walls = [];
   const slabs = [];
   const doors = [];
@@ -19249,11 +19384,16 @@ function getSceneInfo() {
     suggestedNextTools: roomSummaries.length === 0 ? ["create_room", "create_apartment", "create_polygon_room"] : ["validate_scene", "add_door_to_wall", "add_window_to_wall", "auto_align_windows", "place_in_room"]
   };
   const agentNextActions = {
-    primary: roomSummaries.length === 0 ? "create_layout" : lastValidationReport && lastValidationReport.blocking ? "repair_validation" : roomSummaries.some((room) => room.doorCount === 0 || windowCountNeedsAttention(room.roomType, room.windowCount)) ? "add_openings" : items.length === 0 ? "solve_furniture" : "validate_scene",
+    primary: roomSummaries.length === 0 ? "create_layout" : lastValidationReport && !validationIsCurrent ? "validate_scene" : validationIsCurrent && lastValidationReport && lastValidationReport.blocking ? "repair_validation" : roomSummaries.some((room) => room.doorCount === 0 || windowCountNeedsAttention(room.roomType, room.windowCount)) ? "add_openings" : items.length === 0 ? "solve_furniture" : "validate_scene",
     alternatives: roomSummaries.length === 0 ? ["create_room", "create_apartment", "create_polygon_room"] : ["validate_scene", "add_door_to_wall", "add_window_to_wall", "suggest_furniture_layout"],
-    blockedBy: lastValidationReport && lastValidationReport.blocking ? {
+    blockedBy: validationIsCurrent && lastValidationReport && lastValidationReport.blocking ? {
       blockingRuleIds: lastValidationReport.blockingRuleIds,
       repairHints: lastValidationReport.repairHints
+    } : null,
+    validationState: lastValidationReport ? {
+      current: validationIsCurrent,
+      stale: !validationIsCurrent,
+      nextAction: validationIsCurrent ? "Use the current validation result." : "Scene changed after the last validation; run validate_scene before treating prior blocking rules as active."
     } : null,
     candidateArgs: {
       validate_scene: {},
@@ -19286,7 +19426,10 @@ function getSceneInfo() {
       blocking: lastValidationReport.blocking,
       blockingRuleIds: lastValidationReport.blockingRuleIds,
       ruleSummary: lastValidationReport.ruleSummary,
-      repairHints: lastValidationReport.repairHints
+      repairHints: lastValidationReport.repairHints,
+      current: validationIsCurrent,
+      stale: !validationIsCurrent,
+      nextAction: validationIsCurrent ? "Use this validation result for staging decisions." : "This validation is stale because the scene changed; call validate_scene again."
     } : null,
     roomSummaries,
     wallDetails: walls,
@@ -21384,8 +21527,10 @@ function validateScene(args = {}) {
   const report = formatValidationReport(result);
   try {
     lastValidationReport = JSON.parse(report);
+    lastValidationSceneSignature = sceneSignature(levelId);
   } catch {
     lastValidationReport = null;
+    lastValidationSceneSignature = null;
   }
   return report;
 }
@@ -23674,6 +23819,30 @@ var AGENT_TOOL_CONTRACTS = {
     requiresNodeId: true,
     recoveryAction: "Delete only a known problematic node from repairHints/candidateRefs."
   },
+  delete_all_on_level: {
+    name: "delete_all_on_level",
+    phases: ["layout"],
+    modifiesScene: true,
+    highRisk: true,
+    fallbackOnly: true,
+    recoveryAction: "Only clear a level when the user explicitly asks to reset/delete the current level."
+  },
+  undo: {
+    name: "undo",
+    phases: ["diagnostic", "layout", "openings", "validation_repair", "furnishing", "roof_detail"],
+    recoveryAction: "Undo the latest scene edit only when the user explicitly requests rollback."
+  },
+  redo: {
+    name: "redo",
+    phases: ["diagnostic", "layout", "openings", "validation_repair", "furnishing", "roof_detail"],
+    recoveryAction: "Redo the latest undone scene edit only when the user explicitly requests it."
+  },
+  select_node: {
+    name: "select_node",
+    phases: ["diagnostic"],
+    requiresNodeId: true,
+    recoveryAction: "Use candidate node IDs from get_scene_info before selecting."
+  },
   suggest_furniture_layout: {
     name: "suggest_furniture_layout",
     phases: ["furnishing", "validation_repair"],
@@ -23702,6 +23871,11 @@ var AGENT_TOOL_CONTRACTS = {
     requiresNonBlockingValidation: true,
     recommendedTool: "place_furniture_solved",
     recoveryAction: "Prefer place_furniture_solved for deterministic layout; furnish_room remains semantic convenience."
+  },
+  list_furniture: {
+    name: "list_furniture",
+    phases: ["diagnostic", "furnishing"],
+    recoveryAction: "Inspect available furniture IDs before choosing solver furnitureItems."
   },
   place_in_room: {
     name: "place_in_room",
@@ -23799,6 +23973,36 @@ var AGENT_TOOL_CONTRACTS = {
     modifiesScene: true,
     highRisk: true,
     recoveryAction: "Use only when start/end level IDs are known."
+  },
+  add_level: {
+    name: "add_level",
+    phases: ["layout"],
+    modifiesScene: true,
+    recoveryAction: "Use only for explicit multi-level requests; validate each level after layout edits."
+  },
+  switch_level: {
+    name: "switch_level",
+    phases: ["diagnostic", "layout", "openings", "validation_repair", "furnishing", "roof_detail"],
+    recoveryAction: "Switch levels only when the target level ID/name is known from list_levels or get_scene_info."
+  },
+  delete_level: {
+    name: "delete_level",
+    phases: ["layout"],
+    modifiesScene: true,
+    highRisk: true,
+    fallbackOnly: true,
+    recoveryAction: "Delete a level only when the user explicitly requests it and the level ID is known."
+  },
+  rename_level: {
+    name: "rename_level",
+    phases: ["layout"],
+    modifiesScene: true,
+    recoveryAction: "Rename a known level when the user explicitly asks for level naming."
+  },
+  list_levels: {
+    name: "list_levels",
+    phases: ["diagnostic", "layout"],
+    recoveryAction: "Inspect level IDs before switching, duplicating, deleting, or stair generation."
   }
 };
 var STORAGE_KEY = "pascal-agent-settings";
@@ -23856,11 +24060,10 @@ function getAgentToolContract(toolName) {
 }
 function listAgentToolContracts() {
   const names = new Set(agentTools.map(agentToolName).filter((name) => Boolean(name)));
-  return Array.from(names).map((name) => AGENT_TOOL_CONTRACTS[name] ?? {
-    name,
-    phases: ["diagnostic"],
-    recoveryAction: "No explicit contract yet; use only when exposed by policy and schema arguments are complete."
-  });
+  return Array.from(names).map((name) => AGENT_TOOL_CONTRACTS[name]).filter((contract) => Boolean(contract));
+}
+function findAgentToolsMissingContracts() {
+  return agentTools.map(agentToolName).filter((name) => Boolean(name)).filter((name) => !AGENT_TOOL_CONTRACTS[name]);
 }
 function validateToolArguments(toolName, args) {
   const tool = findAgentTool(toolName);
@@ -23919,17 +24122,33 @@ function validateSceneReferences(toolName, args, errors) {
 }
 function buildInvalidToolArgumentsResult(toolName, validation) {
   const candidateRefs = collectCandidateRefs();
+  const failureKind = classifyArgumentFailure(validation.errors);
+  const recommendedNextTool = recommendedNextToolForInvalidArgs(toolName, validation.errors);
+  const retryArgsHint = retryArgsHintForTool(toolName, candidateRefs);
+  const recoveryPlan = buildAgentRecoveryPlan({
+    toolName,
+    failureKind,
+    errors: validation.errors,
+    recommendedTool: recommendedNextTool,
+    candidateRefs,
+    retryArgs: retryArgsHint
+  });
   return {
     success: false,
-    failureKind: classifyArgumentFailure(validation.errors),
+    failureKind,
     error: "Invalid tool arguments",
     tool: toolName,
+    createdNodeIds: [],
+    modifiedNodeIds: [],
+    sceneDelta: { createdNodeIds: [], modifiedNodeIds: [], createdCount: 0, modifiedCount: 0 },
     argumentErrors: validation.errors,
     requiredArguments: validation.required ?? [],
     missingInputs: missingInputsForErrors(validation.errors),
     candidateRefs,
-    recommendedNextTool: recommendedNextToolForInvalidArgs(toolName, validation.errors),
-    retryArgsHint: retryArgsHintForTool(toolName, candidateRefs),
+    recommendedNextTool,
+    retryArgsHint,
+    recoveryPlan,
+    suggestedNextTools: [recommendedNextTool],
     nextAction: "Retry the same exposed tool with complete arguments that match its schema, or call get_scene_info if required IDs are missing."
   };
 }
@@ -23971,6 +24190,26 @@ function retryArgsHintForTool(toolName, candidateRefs) {
     hint.roomType = roomType ?? "living";
   }
   return hint;
+}
+function buildAgentRecoveryPlan(params) {
+  const candidateRefs = params.candidateRefs ?? collectCandidateRefs();
+  const recommendedTool = params.recommendedTool ?? recommendedNextToolForInvalidArgs(params.toolName, params.errors ?? []);
+  const retryArgs = params.retryArgs ?? retryArgsHintForTool(recommendedTool, candidateRefs);
+  const rootCause = (() => {
+    if (params.errors?.length) return params.errors.join("; ");
+    if (params.failureKind === "phase") return `${params.toolName} is hidden in the current agent phase`;
+    if (params.failureKind === "invalid_json") return `${params.toolName} arguments were not valid JSON`;
+    if (params.failureKind === "blocked_validation") return "current validation is blocking post-layout work";
+    return `${params.toolName} is not ready to execute`;
+  })();
+  return {
+    failureKind: params.failureKind,
+    rootCause,
+    recommendedTool,
+    retryArgs,
+    candidateRefs,
+    mustValidateAfter: params.mustValidateAfter ?? true
+  };
 }
 function isSchemaObject(value) {
   return Boolean(value && typeof value === "object");
@@ -24078,7 +24317,57 @@ function collectCandidateRefs(sceneContext = getSceneContextSnapshot()) {
     type: String(node.type ?? ""),
     name: typeof node.name === "string" ? node.name : void 0
   })).filter((node) => node.id);
+  if ((refs.slabs?.length ?? 0) === 0 || (refs.walls?.length ?? 0) === 0) {
+    const fallbackContext = sceneContext ? getSceneContextSnapshot() : null;
+    if (fallbackContext && fallbackContext !== sceneContext) {
+      const fallbackRefs = collectCandidateRefs(fallbackContext);
+      return {
+        slabs: refs.slabs?.length ? refs.slabs : fallbackRefs.slabs,
+        walls: refs.walls?.length ? refs.walls : fallbackRefs.walls,
+        nodes: refs.nodes?.length ? refs.nodes : fallbackRefs.nodes
+      };
+    }
+  }
   return refs;
+}
+function parseValidationSnapshotFromSceneContext(sceneContext) {
+  const raw = isPlainObject2(sceneContext?.lastValidation) ? sceneContext.lastValidation : null;
+  if (!raw) return null;
+  return normalizeValidationSnapshot(raw);
+}
+function normalizeValidationSnapshot(raw) {
+  return {
+    valid: Boolean(raw.valid),
+    blocking: Boolean(raw.blocking),
+    fixedCount: raw.fixedCount ?? 0,
+    warningCount: raw.warningCount ?? 0,
+    issues: Array.isArray(raw.issues) ? raw.issues : [],
+    nextAction: raw.nextAction,
+    issueSummary: raw.issueSummary,
+    ruleSummary: raw.ruleSummary,
+    blockingRuleIds: Array.isArray(raw.blockingRuleIds) ? raw.blockingRuleIds : [],
+    repairHints: Array.isArray(raw.repairHints) ? raw.repairHints : [],
+    current: raw.current,
+    stale: raw.stale
+  };
+}
+function chooseCurrentValidationSnapshot(localValidation, sceneValidation) {
+  if (sceneValidation?.current) return sceneValidation;
+  if (localValidation?.current) return localValidation;
+  if (localValidation && !localValidation.stale) return localValidation;
+  return sceneValidation ?? localValidation;
+}
+function validationStateFromSnapshot(snapshot) {
+  if (!snapshot) return void 0;
+  const current = snapshot.current !== false && snapshot.stale !== true;
+  const stale = snapshot.stale === true || snapshot.current === false;
+  return {
+    current,
+    stale,
+    blocking: Boolean(snapshot.blocking),
+    blockingRuleIds: snapshot.blockingRuleIds ?? [],
+    nextAction: snapshot.nextAction
+  };
 }
 function hasCandidateRefs(refs) {
   return Boolean((refs?.slabs?.length ?? 0) > 0 || (refs?.walls?.length ?? 0) > 0 || (refs?.nodes?.length ?? 0) > 0);
@@ -24135,7 +24424,7 @@ function toolNamesForPhase(phase, wantsExactCoordinates) {
     return toolContractPhaseMatches(contract, phase);
   }).map((contract) => contract.name);
 }
-function resolveAgentRunPolicy(userContent, lastValidation = null, sceneProgress = null) {
+function resolveAgentRunPolicy(userContent, lastValidation = null, sceneProgress = null, sceneContext = null) {
   const normalized = userContent.toLowerCase();
   const isChineseResidential = /中文|中国|国标|住宅|公寓|户型|两居|三居|卧室|客厅|厨房|卫生间|阳台/.test(userContent);
   const isResidential = isChineseResidential || /residential|apartment|house|home|bedroom|living|kitchen|bathroom/.test(normalized);
@@ -24145,11 +24434,16 @@ function resolveAgentRunPolicy(userContent, lastValidation = null, sceneProgress
   const rapid = allowsRapidConcept(userContent);
   const isComplex = isComplexGenerationRequest(userContent);
   const wantsExactCoordinates = wantsExactCoordinatePlacement(userContent);
+  const validationState = validationStateFromSnapshot(lastValidation);
+  const hasCurrentBlockingValidation = Boolean(validationState?.current && validationState.blocking);
+  const agentNextAction = readAgentNextAction(sceneContext);
   let phase = "layout";
-  if (lastValidation?.blocking) {
-    phase = "validation_repair";
-  } else if (isComplex && !rapid && !sceneProgress?.hasLayout) {
+  if (sceneProgress && !sceneProgress.hasLayout) {
     phase = "layout";
+  } else if (hasCurrentBlockingValidation) {
+    phase = "validation_repair";
+  } else if (agentNextAction === "validate_scene" && validationState?.stale) {
+    phase = sceneProgress?.hasLayout && includesFurnishing ? "furnishing" : "openings";
   } else if (sceneProgress?.hasLayout && sceneProgress.hasRoomsNeedingOpenings && (isResidential || isComplex)) {
     phase = "openings";
   } else if (includesFurnishing && sceneProgress?.hasLayout) {
@@ -24179,16 +24473,25 @@ function resolveAgentRunPolicy(userContent, lastValidation = null, sceneProgress
     wantsExactCoordinates,
     allowedNextTools,
     deferredTools: phase === "validation_repair" ? Array.from(POST_LAYOUT_TOOLS) : [],
-    sceneProgress: sceneProgress ?? void 0
+    sceneProgress: sceneProgress ?? void 0,
+    validationState,
+    agentNextAction,
+    policySource: "user_intent+scene_progress+scene_validation"
   };
 }
-function selectAgentToolsForPolicy(policy, lastValidation = null) {
+function readAgentNextAction(sceneContext) {
+  const agentNextActions = isPlainObject2(sceneContext?.agentNextActions) ? sceneContext.agentNextActions : null;
+  return typeof agentNextActions?.primary === "string" ? agentNextActions.primary : void 0;
+}
+function selectAgentToolsForPolicy(policy, lastValidation = null, sceneContext = null) {
   const alwaysVisible = /* @__PURE__ */ new Set(["get_scene_info", "validate_scene"]);
   const allowed = /* @__PURE__ */ new Set([...policy.allowedNextTools, ...alwaysVisible]);
-  if (policy.phase === "validation_repair" && lastValidation?.blocking) {
+  if (policy.phase === "validation_repair" && lastValidation?.blocking && !lastValidation.stale) {
     const hintTools = /* @__PURE__ */ new Set();
     for (const hint of lastValidation.repairHints ?? []) {
-      for (const tool of hint.preferredTools ?? []) hintTools.add(tool);
+      for (const tool of hint.preferredTools ?? []) {
+        if (getAgentToolContract(tool)) hintTools.add(tool);
+      }
     }
     if (hintTools.size > 0) {
       allowed.clear();
@@ -24207,17 +24510,29 @@ function selectAgentToolsForPolicy(policy, lastValidation = null) {
   });
   const hiddenCount = agentTools.length - tools.length;
   const hiddenToolReasonSummary = hiddenCount === 0 ? "All tools are exposed for this agent turn." : `${hiddenCount} tools are hidden because the current phase is ${policy.phase}; hidden tools should be used in a later stage or after validation repair.`;
+  const hiddenToolReasonByCategory = summarizeHiddenToolReasons(hiddenToolNames, policy);
   return {
     tools,
     exposedToolNames,
     hiddenToolNames,
     hiddenToolReasonSummary,
-    toolDecisionCards: buildToolDecisionCards(exposedToolNames, policy, lastValidation)
+    hiddenToolReasonByCategory,
+    toolDecisionCards: buildToolDecisionCards(exposedToolNames, policy, lastValidation, sceneContext)
   };
 }
-function buildToolDecisionCards(toolNames, policy, lastValidation) {
-  const candidateRefs = collectCandidateRefs();
-  return toolNames.filter((tool) => tool !== "get_scene_info").slice(0, 12).map((tool) => {
+function summarizeHiddenToolReasons(toolNames, policy) {
+  const summary = {};
+  for (const toolName of toolNames) {
+    const contract = getAgentToolContract(toolName);
+    const category = !contract ? "missing_contract" : contract.fallbackOnly && !policy.wantsExactCoordinates ? "fallback_only" : !toolContractPhaseMatches(contract, policy.phase) ? "phase_mismatch" : "filtered";
+    summary[category] = (summary[category] ?? 0) + 1;
+  }
+  return summary;
+}
+function buildToolDecisionCards(toolNames, policy, lastValidation, sceneContext = null) {
+  const candidateRefs = collectCandidateRefs(sceneContext ?? void 0);
+  const candidateArgs = collectCandidateArgs(sceneContext);
+  return toolNames.filter((tool) => tool !== "get_scene_info").slice(0, 8).map((tool) => {
     const contract = getAgentToolContract(tool);
     const readinessCandidateRefs = {};
     if (contract?.requiresSlabId && candidateRefs.slabs?.length) readinessCandidateRefs.slabs = candidateRefs.slabs;
@@ -24237,9 +24552,32 @@ function buildToolDecisionCards(toolNames, policy, lastValidation) {
       requiredArguments: schemaRequired,
       prerequisites,
       ...hasCandidateRefs(readinessCandidateRefs) ? { candidateRefs: readinessCandidateRefs } : {},
+      ...candidateArgs[tool] ? { candidateArgs: candidateArgs[tool] } : {},
+      whenToUse: contract?.recoveryAction ?? "Use when this tool is exposed and all required IDs are known.",
+      doNotUseWhen: doNotUseWhenForTool(tool, contract, policy),
+      requiresValidationState: contract?.requiresNonBlockingValidation ? "current_non_blocking" : policy.phase === "validation_repair" ? "current_blocking" : "any",
       nextAction: nextActionForTool(tool, contract, policy, lastValidation)
     };
   });
+}
+function collectCandidateArgs(sceneContext) {
+  const agentNextActions = isPlainObject2(sceneContext?.agentNextActions) ? sceneContext.agentNextActions : null;
+  const raw = isPlainObject2(agentNextActions?.candidateArgs) ? agentNextActions.candidateArgs : {};
+  const result = {};
+  for (const [tool, args] of Object.entries(raw)) {
+    if (isPlainObject2(args)) result[tool] = args;
+  }
+  return result;
+}
+function doNotUseWhenForTool(toolName, contract, policy) {
+  const reasons = [];
+  if (contract?.fallbackOnly && !policy.wantsExactCoordinates) reasons.push("fallback_only_without_exact_coordinates");
+  if (contract?.requiresNonBlockingValidation) reasons.push("validation_blocking_or_stale");
+  if (toolName === "place_furniture") reasons.push("solver_tools_are_available");
+  if (policy.phase === "openings" && ["place_furniture_solved", "suggest_furniture_layout", "furnish_room"].includes(toolName)) {
+    reasons.push("openings_not_complete");
+  }
+  return reasons;
 }
 function requiredArgumentsForTool(toolName) {
   const tool = findAgentTool(toolName);
@@ -24248,67 +24586,88 @@ function requiredArgumentsForTool(toolName) {
   return parameters.required.filter((value) => typeof value === "string");
 }
 function nextActionForTool(toolName, contract, policy, lastValidation) {
-  if (policy.phase === "validation_repair" && lastValidation?.blocking) {
+  if (policy.phase === "validation_repair" && lastValidation?.blocking && !lastValidation.stale) {
     return `Fix blocking rules (${(lastValidation.blockingRuleIds ?? []).join(", ") || "unknown"}), then run validate_scene.`;
   }
   if (contract?.recoveryAction) return contract.recoveryAction;
   if (toolName === "validate_scene") return `Validate with ${policy.codeProfile}.`;
   return "Use this tool only with complete schema arguments and known scene IDs.";
 }
-function buildBlockedToolResult(toolName, policy, exposure, lastValidation = null) {
+function buildBlockedToolResult(toolName, policy, exposure, lastValidation = null, sceneContext = null) {
   const contract = getAgentToolContract(toolName);
-  const candidateRefs = collectCandidateRefs();
+  const candidateRefs = collectCandidateRefs(sceneContext ?? void 0);
+  const recommendedNextTool = contract?.recommendedTool ?? exposure.exposedToolNames[0] ?? "get_scene_info";
+  const retryArgsHint = retryArgsHintForTool(recommendedNextTool, candidateRefs);
+  const recoveryPlan = buildAgentRecoveryPlan({
+    toolName,
+    failureKind: "phase",
+    recommendedTool: recommendedNextTool,
+    candidateRefs,
+    retryArgs: retryArgsHint
+  });
   return {
     success: false,
     failureKind: "phase",
     blocked: true,
     tool: toolName,
+    createdNodeIds: [],
+    modifiedNodeIds: [],
+    sceneDelta: { createdNodeIds: [], modifiedNodeIds: [], createdCount: 0, modifiedCount: 0 },
     phaseBlockedBy: policy.phase,
     reason: `Tool ${toolName} is not exposed in the current agent phase.`,
     hiddenToolReasonSummary: exposure.hiddenToolReasonSummary,
     allowedNextTools: exposure.exposedToolNames,
     requiredRuleFixes: lastValidation?.blockingRuleIds ?? [],
-    repairHints: lastValidation?.blocking ? (lastValidation.repairHints ?? []).slice(0, 5) : [],
+    repairHints: lastValidation?.blocking && !lastValidation.stale ? (lastValidation.repairHints ?? []).slice(0, 5) : [],
     candidateRefs,
-    recommendedNextTool: contract?.recommendedTool ?? exposure.exposedToolNames[0] ?? "get_scene_info",
-    retryArgsHint: retryArgsHintForTool(contract?.recommendedTool ?? exposure.exposedToolNames[0] ?? toolName, candidateRefs),
+    recommendedNextTool,
+    retryArgsHint,
+    recoveryPlan,
+    suggestedNextTools: exposure.exposedToolNames.slice(0, 8),
     nextAction: "Choose one of allowedNextTools for this turn. If the intended tool is hidden, complete the current validation/staging phase first."
   };
 }
 function buildInvalidJsonToolResult(toolName, rawArguments, message) {
+  const candidateRefs = collectCandidateRefs();
+  const recoveryPlan = buildAgentRecoveryPlan({
+    toolName,
+    failureKind: "invalid_json",
+    errors: [message],
+    recommendedTool: toolName,
+    candidateRefs,
+    retryArgs: {},
+    mustValidateAfter: false
+  });
   return {
     success: false,
     failureKind: "invalid_json",
     error: "Invalid tool arguments JSON",
     tool: toolName,
+    createdNodeIds: [],
+    modifiedNodeIds: [],
+    sceneDelta: { createdNodeIds: [], modifiedNodeIds: [], createdCount: 0, modifiedCount: 0 },
     arguments: rawArguments,
     message,
-    candidateRefs: collectCandidateRefs(),
+    candidateRefs,
     recommendedNextTool: toolName,
     retryArgsHint: {},
+    recoveryPlan,
+    suggestedNextTools: [toolName],
     nextAction: "Call the same exposed tool again with complete valid JSON arguments that match the tool schema."
   };
 }
 function parseValidationSnapshot(raw) {
   try {
     const parsed = JSON.parse(raw);
-    return {
-      valid: Boolean(parsed.valid),
-      blocking: Boolean(parsed.blocking ?? (parsed.warningCount ?? 0) > 0),
-      fixedCount: parsed.fixedCount ?? 0,
-      warningCount: parsed.warningCount ?? 0,
-      issues: Array.isArray(parsed.issues) ? parsed.issues : [],
-      nextAction: parsed.nextAction,
-      issueSummary: parsed.issueSummary,
-      ruleSummary: parsed.ruleSummary,
-      blockingRuleIds: parsed.blockingRuleIds,
-      repairHints: Array.isArray(parsed.repairHints) ? parsed.repairHints : []
-    };
+    return normalizeValidationSnapshot({
+      ...parsed,
+      blocking: Boolean(parsed.blocking ?? (parsed.warningCount ?? 0) > 0)
+    });
   } catch {
     return null;
   }
 }
-function buildValidationMessage(snapshot, policy) {
+function buildValidationMessage(snapshot, policy, sceneContext = null) {
   const payload = {
     type: "spatial_validation",
     codeProfile: policy.codeProfile,
@@ -24321,7 +24680,7 @@ function buildValidationMessage(snapshot, policy) {
     ruleSummary: snapshot.ruleSummary ?? {},
     repairHints: (snapshot.repairHints ?? []).slice(0, 8),
     allowedNextTools: snapshot.blocking ? policy.allowedNextTools : void 0,
-    toolDecisionCards: snapshot.blocking ? buildToolDecisionCards(policy.allowedNextTools, policy, snapshot).slice(0, 8) : void 0,
+    toolDecisionCards: snapshot.blocking ? buildToolDecisionCards(policy.allowedNextTools, policy, snapshot, sceneContext).slice(0, 8) : void 0,
     nextAction: snapshot.nextAction ?? (snapshot.blocking ? "Use repairHints with the allowed repair tools, then validate again before furniture/roof/detail work." : "Validation passed; continue to the next staged generation phase.")
   };
   return `[Spatial Auto-Validation JSON]
@@ -24338,12 +24697,19 @@ function stagedDeferralForTool(toolName, userContent, lastValidation, policy = r
       nextAction: "Use create_apartment/create_room/create_polygon_room/create_hallway for the layout phase, then wait for validation feedback."
     };
   }
-  if (lastValidation?.blocking && POST_LAYOUT_TOOLS.has(toolName)) {
+  if (lastValidation?.blocking && !lastValidation.stale && POST_LAYOUT_TOOLS.has(toolName)) {
+    const repairPolicy = resolveAgentRunPolicy(userContent, lastValidation, policy.sceneProgress ?? null);
+    const repairExposure = selectAgentToolsForPolicy(repairPolicy, lastValidation);
+    const contract = getAgentToolContract(toolName);
+    const allowedNextTools = Array.from(/* @__PURE__ */ new Set([
+      ...repairExposure.exposedToolNames,
+      ...contract?.recommendedTool ? [contract.recommendedTool] : []
+    ]));
     return {
       deferred: true,
       tool: toolName,
-      phaseBlockedBy: "validation_repair",
-      allowedNextTools: policy.allowedNextTools,
+      phaseBlockedBy: repairPolicy.phase,
+      allowedNextTools,
       requiredRuleFixes: lastValidation.blockingRuleIds ?? [],
       repairHints: (lastValidation.repairHints ?? []).slice(0, 5),
       reason: "The previous validation report still has warnings. Post-layout work is blocked until those warnings are fixed.",
@@ -24358,21 +24724,33 @@ function stagedDeferralForTool(toolName, userContent, lastValidation, policy = r
   }
   return null;
 }
-function validateToolReadiness(toolName, args, policy, sceneProgress = policy.sceneProgress ?? null, lastValidation = null) {
-  const candidateRefs = collectCandidateRefs();
+function validateToolReadiness(toolName, args, policy, sceneProgress = policy.sceneProgress ?? null, lastValidation = null, sceneContext = null) {
+  const candidateRefs = collectCandidateRefs(sceneContext ?? void 0);
   const contract = getAgentToolContract(toolName);
   const schemaValidation = validateToolArguments(toolName, args);
   if (!schemaValidation.valid) {
+    const failureKind = classifyArgumentFailure(schemaValidation.errors);
+    const recommendedTool = recommendedNextToolForInvalidArgs(toolName, schemaValidation.errors);
+    const retryArgsHint = retryArgsHintForTool(toolName, candidateRefs);
+    const recoveryPlan = buildAgentRecoveryPlan({
+      toolName,
+      failureKind,
+      errors: schemaValidation.errors,
+      recommendedTool,
+      candidateRefs,
+      retryArgs: retryArgsHint
+    });
     return {
       valid: false,
-      failureKind: classifyArgumentFailure(schemaValidation.errors),
+      failureKind,
       errors: schemaValidation.errors,
       required: schemaValidation.required,
       missingInputs: missingInputsForErrors(schemaValidation.errors),
       candidateRefs,
-      recommendedTool: recommendedNextToolForInvalidArgs(toolName, schemaValidation.errors),
-      recommendedNextTool: recommendedNextToolForInvalidArgs(toolName, schemaValidation.errors),
-      retryArgsHint: retryArgsHintForTool(toolName, candidateRefs)
+      recommendedTool,
+      recommendedNextTool: recommendedTool,
+      retryArgsHint,
+      recoveryPlan
     };
   }
   const missingInputs = [];
@@ -24393,20 +24771,32 @@ function validateToolReadiness(toolName, args, policy, sceneProgress = policy.sc
     missingInputs.push(toolName === "move_nodes" || toolName === "batch_modify_nodes" ? "nodeIds" : "nodeId");
     errors.push(`${toolName === "move_nodes" || toolName === "batch_modify_nodes" ? "nodeIds" : "nodeId"} is required before this tool can run`);
   }
-  if (contract?.requiresNonBlockingValidation && lastValidation?.blocking && policy.phase !== "validation_repair") {
+  if (contract?.requiresNonBlockingValidation && lastValidation?.blocking && !lastValidation.stale && policy.phase !== "validation_repair") {
     errors.push("non-blocking validation is required before this post-layout tool can run");
   }
   if (errors.length > 0) {
+    const failureKind = lastValidation?.blocking && !lastValidation.stale && contract?.requiresNonBlockingValidation ? "blocked_validation" : "missing_scene_prerequisite";
+    const recommendedTool = contract?.recommendedTool ?? (missingInputs.includes("layout") ? "create_room" : "get_scene_info");
+    const retryArgsHint = retryArgsHintForTool(toolName, candidateRefs);
+    const recoveryPlan = buildAgentRecoveryPlan({
+      toolName,
+      failureKind,
+      errors,
+      recommendedTool,
+      candidateRefs,
+      retryArgs: retryArgsHint
+    });
     return {
       valid: false,
-      failureKind: lastValidation?.blocking && contract?.requiresNonBlockingValidation ? "blocked_validation" : "missing_scene_prerequisite",
+      failureKind,
       errors,
       required: requiredArgumentsForTool(toolName),
       missingInputs,
       candidateRefs,
-      recommendedTool: contract?.recommendedTool ?? (missingInputs.includes("layout") ? "create_room" : "get_scene_info"),
-      recommendedNextTool: contract?.recommendedTool ?? (missingInputs.includes("layout") ? "create_room" : "get_scene_info"),
-      retryArgsHint: retryArgsHintForTool(toolName, candidateRefs)
+      recommendedTool,
+      recommendedNextTool: recommendedTool,
+      retryArgsHint,
+      recoveryPlan
     };
   }
   return { valid: true, errors: [], required: requiredArgumentsForTool(toolName) };
@@ -24424,22 +24814,39 @@ function hasNodeArgs(toolName, args) {
   return typeof args.nodeId === "string" && args.nodeId.length > 0;
 }
 function buildToolReadinessFailureResult(toolName, readiness) {
+  const candidateRefs = readiness.candidateRefs ?? collectCandidateRefs();
+  const recommendedNextTool = readiness.recommendedNextTool ?? readiness.recommendedTool ?? "get_scene_info";
+  const retryArgsHint = readiness.retryArgsHint ?? retryArgsHintForTool(recommendedNextTool, candidateRefs);
+  const recoveryPlan = readiness.recoveryPlan ?? buildAgentRecoveryPlan({
+    toolName,
+    failureKind: readiness.failureKind ?? "missing_scene_prerequisite",
+    errors: readiness.errors,
+    recommendedTool: recommendedNextTool,
+    candidateRefs,
+    retryArgs: retryArgsHint
+  });
   return {
     success: false,
     failureKind: readiness.failureKind ?? "missing_scene_prerequisite",
     error: "Tool is not ready to execute",
     tool: toolName,
+    createdNodeIds: [],
+    modifiedNodeIds: [],
+    sceneDelta: { createdNodeIds: [], modifiedNodeIds: [], createdCount: 0, modifiedCount: 0 },
     argumentErrors: readiness.errors,
     requiredArguments: readiness.required ?? [],
     missingInputs: readiness.missingInputs ?? [],
-    candidateRefs: readiness.candidateRefs ?? collectCandidateRefs(),
+    candidateRefs,
     recommendedTool: readiness.recommendedTool,
-    recommendedNextTool: readiness.recommendedNextTool ?? readiness.recommendedTool ?? "get_scene_info",
-    retryArgsHint: readiness.retryArgsHint ?? {},
+    recommendedNextTool,
+    retryArgsHint,
+    recoveryPlan,
+    suggestedNextTools: [recommendedNextTool],
     nextAction: "Use candidateRefs and retryArgsHint to call the recommended tool or retry this tool with complete IDs."
   };
 }
 function createAgentTraceEntry(policy, exposure, gateDecision, toolCall, readinessFailure, lastValidation = null) {
+  const selectedCard = toolCall ? exposure.toolDecisionCards.find((card) => card.tool === toolCall) : void 0;
   return {
     phase: policy.phase,
     codeProfile: policy.codeProfile,
@@ -24448,7 +24855,13 @@ function createAgentTraceEntry(policy, exposure, gateDecision, toolCall, readine
     ...toolCall ? { toolCall } : {},
     gateDecision,
     ...readinessFailure && !readinessFailure.valid ? { readinessFailure } : {},
-    validationBlockingRuleIds: lastValidation?.blockingRuleIds ?? []
+    validationBlockingRuleIds: lastValidation?.blockingRuleIds ?? [],
+    sceneValidationState: policy.validationState,
+    policySource: policy.policySource,
+    hiddenToolReasonByCategory: exposure.hiddenToolReasonByCategory,
+    recoveryPlan: readinessFailure?.recoveryPlan,
+    selectedCandidateArgs: selectedCard?.candidateArgs,
+    sceneProgress: policy.sceneProgress
   };
 }
 function appendAgentTraceToToolResult(rawResult, agentTrace) {
@@ -24512,17 +24925,25 @@ async function runAgentLoop(userContent, get, set2) {
   let iteration = 0;
   let lastValidation = null;
   let lastPolicy = null;
+  let lastGateDecision = null;
+  let lastRecommendedTools = [];
+  let lastRecoveryPlan = null;
   while (iteration < MAX_ITERATIONS) {
     iteration++;
     const sceneContext = executeToolCall("get_scene_info", {});
+    const sceneContextParsed = parseSceneContext(sceneContext);
+    const sceneValidation = parseValidationSnapshotFromSceneContext(sceneContextParsed);
+    lastValidation = chooseCurrentValidationSnapshot(lastValidation, sceneValidation);
     const sceneProgress = parseAgentSceneProgress(sceneContext);
-    const runPolicy = resolveAgentRunPolicy(userContent, lastValidation, sceneProgress);
+    const runPolicy = resolveAgentRunPolicy(userContent, lastValidation, sceneProgress, sceneContextParsed);
     lastPolicy = runPolicy;
-    const toolExposure = selectAgentToolsForPolicy(runPolicy, lastValidation);
+    const toolExposure = selectAgentToolsForPolicy(runPolicy, lastValidation, sceneContextParsed);
+    lastRecommendedTools = toolExposure.exposedToolNames;
     const toolContext = {
       exposedToolNames: toolExposure.exposedToolNames,
       hiddenToolNames: toolExposure.hiddenToolNames,
       hiddenToolReasonSummary: toolExposure.hiddenToolReasonSummary,
+      hiddenToolReasonByCategory: toolExposure.hiddenToolReasonByCategory,
       toolDecisionCards: toolExposure.toolDecisionCards,
       instruction: "Only call tools listed in exposedToolNames this turn. Use toolDecisionCards for required IDs, candidateRefs, and next action. Tools not exposed are intentionally hidden for the current architectural phase."
     };
@@ -24585,13 +25006,17 @@ ${sceneContext}`;
         try {
           toolArgs = tc.arguments.trim() ? JSON.parse(tc.arguments) : {};
         } catch (err) {
+          lastGateDecision = "invalid_json";
+          const invalidJsonResult = buildInvalidJsonToolResult(tc.name, tc.arguments, err instanceof Error ? err.message : String(err));
+          lastRecoveryPlan = isPlainObject2(invalidJsonResult.recoveryPlan) ? invalidJsonResult.recoveryPlan : null;
           result = JSON.stringify({
-            ...buildInvalidJsonToolResult(tc.name, tc.arguments, err instanceof Error ? err.message : String(err)),
+            ...invalidJsonResult,
             agentTrace: createAgentTraceEntry(runPolicy, toolExposure, "invalid_json", tc.name, {
               valid: false,
               failureKind: "invalid_json",
               errors: [err instanceof Error ? err.message : String(err)],
-              candidateRefs: collectCandidateRefs()
+              candidateRefs: collectCandidateRefs(),
+              recoveryPlan: lastRecoveryPlan ?? void 0
             }, lastValidation)
           });
           const toolMsg2 = {
@@ -24606,23 +25031,32 @@ ${sceneContext}`;
           continue;
         }
         const stagedDeferral = isSceneModifyingTool ? stagedDeferralForTool(tc.name, userContent, lastValidation, runPolicy) : null;
-        const readiness = isExposedTool ? validateToolReadiness(tc.name, toolArgs, runPolicy, sceneProgress, lastValidation) : null;
+        const readiness = isExposedTool ? validateToolReadiness(tc.name, toolArgs, runPolicy, sceneProgress, lastValidation, sceneContextParsed) : null;
         if (!isExposedTool) {
+          lastGateDecision = "blocked";
+          const blockedResult = buildBlockedToolResult(tc.name, runPolicy, toolExposure, lastValidation, sceneContextParsed);
+          lastRecoveryPlan = isPlainObject2(blockedResult.recoveryPlan) ? blockedResult.recoveryPlan : null;
           result = JSON.stringify({
-            ...buildBlockedToolResult(tc.name, runPolicy, toolExposure, lastValidation),
+            ...blockedResult,
             agentTrace: createAgentTraceEntry(runPolicy, toolExposure, "blocked", tc.name, void 0, lastValidation)
           });
         } else if (readiness && !readiness.valid) {
+          lastGateDecision = "invalid_arguments";
+          lastRecoveryPlan = readiness.recoveryPlan ?? null;
           result = JSON.stringify({
             ...buildToolReadinessFailureResult(tc.name, readiness),
             agentTrace: createAgentTraceEntry(runPolicy, toolExposure, "invalid_arguments", tc.name, readiness, lastValidation)
           });
         } else if (stagedDeferral) {
+          lastGateDecision = "deferred";
+          lastRecoveryPlan = null;
           result = JSON.stringify({
             ...stagedDeferral,
             agentTrace: createAgentTraceEntry(runPolicy, toolExposure, "deferred", tc.name, void 0, lastValidation)
           });
         } else if (isSceneModifyingTool && sceneModificationCount >= MAX_SCENE_MODIFYING_TOOLS_PER_ITERATION) {
+          lastGateDecision = "deferred";
+          lastRecoveryPlan = null;
           result = JSON.stringify({
             success: false,
             failureKind: "phase",
@@ -24636,6 +25070,8 @@ ${sceneContext}`;
           });
         } else {
           const rawResult = executeToolCall(tc.name, toolArgs);
+          lastGateDecision = "executed";
+          lastRecoveryPlan = null;
           result = appendAgentTraceToToolResult(rawResult, createAgentTraceEntry(runPolicy, toolExposure, "executed", tc.name, void 0, lastValidation));
           if (isSceneModifyingTool) {
             hasSceneModification = true;
@@ -24656,12 +25092,18 @@ ${sceneContext}`;
         const validationResult = executeToolCall("validate_scene", { codeProfile: runPolicy.codeProfile });
         const snapshot = parseValidationSnapshot(validationResult);
         if (snapshot) {
-          lastValidation = snapshot;
-          const nextSceneProgress = parseAgentSceneProgress(executeToolCall("get_scene_info", {}));
+          lastValidation = normalizeValidationSnapshot({ ...snapshot, current: true, stale: false });
+          const nextSceneContext = executeToolCall("get_scene_info", {});
+          const nextSceneContextParsed = parseSceneContext(nextSceneContext);
+          const nextSceneProgress = parseAgentSceneProgress(nextSceneContext);
           const validationMsg = {
             id: genId(),
             role: "system",
-            content: buildValidationMessage(snapshot, resolveAgentRunPolicy(userContent, snapshot, nextSceneProgress))
+            content: buildValidationMessage(
+              snapshot,
+              resolveAgentRunPolicy(userContent, snapshot, nextSceneProgress, nextSceneContextParsed),
+              nextSceneContextParsed
+            )
           };
           set2((s) => ({
             messages: [...s.messages, validationMsg]
@@ -24686,7 +25128,7 @@ ${sceneContext}`;
       {
         id: genId(),
         role: "assistant",
-        content: `\u5DE5\u5177\u8C03\u7528\u5DF2\u8FBE\u5230\u672C\u8F6E\u6700\u5927\u8FED\u4EE3\u6B21\u6570\u3002\u5F53\u524D\u9636\u6BB5\uFF1A${lastPolicy?.phase ?? "unknown"}\uFF1B\u6700\u8FD1\u963B\u585E\u89C4\u5219\uFF1A${lastValidation?.blockingRuleIds?.join(", ") || "\u65E0"}\uFF1B\u5EFA\u8BAE\u4E0B\u4E00\u6B65\u5DE5\u5177\uFF1A${lastPolicy?.allowedNextTools.slice(0, 8).join(", ") || "get_scene_info, validate_scene"}\u3002\u5F53\u524D\u573A\u666F\u5DF2\u4FDD\u7559\uFF0C\u8BF7\u5148\u67E5\u770B\u6700\u8FD1\u4E00\u6B21 validation/tool result\uFF0C\u518D\u7EE7\u7EED\u4E0B\u4E00\u6B65\u4FEE\u590D\u6216\u751F\u6210\u3002`
+        content: `\u5DE5\u5177\u8C03\u7528\u5DF2\u8FBE\u5230\u672C\u8F6E\u6700\u5927\u8FED\u4EE3\u6B21\u6570\u3002\u5F53\u524D\u9636\u6BB5\uFF1A${lastPolicy?.phase ?? "unknown"}\uFF1Bvalidation\uFF1A${lastPolicy?.validationState ? JSON.stringify(lastPolicy.validationState) : "unknown"}\uFF1B\u6700\u8FD1 gateDecision\uFF1A${lastGateDecision ?? "unknown"}\uFF1B\u6700\u8FD1 recoveryPlan\uFF1A${lastRecoveryPlan ? JSON.stringify(lastRecoveryPlan) : "\u65E0"}\uFF1B\u6700\u8FD1\u963B\u585E\u89C4\u5219\uFF1A${lastValidation?.blockingRuleIds?.join(", ") || "\u65E0"}\uFF1B\u5EFA\u8BAE\u4E0B\u4E00\u6B65\u5DE5\u5177\uFF1A${lastRecommendedTools.slice(0, 8).join(", ") || lastPolicy?.allowedNextTools.slice(0, 8).join(", ") || "get_scene_info, validate_scene"}\u3002\u5F53\u524D\u573A\u666F\u5DF2\u4FDD\u7559\uFF0C\u8BF7\u5148\u67E5\u770B\u6700\u8FD1\u4E00\u6B21 validation/tool result\uFF0C\u518D\u7EE7\u7EED\u4E0B\u4E00\u6B65\u4FEE\u590D\u6216\u751F\u6210\u3002`
       }
     ],
     isLoading: false
@@ -25037,12 +25479,20 @@ function evaluateAssertion(assertion, steps, validation) {
       return assertAgentToolArgsFromStep(assertion, steps);
     case "agent.toolContract":
       return assertAgentToolContract(assertion);
+    case "agent.allToolsHaveContracts":
+      return assertAgentAllToolsHaveContracts();
     case "agent.toolReadiness":
       return assertAgentToolReadiness(assertion);
     case "toolResult.failureShape":
       return assertToolResultFailureShape(assertion, steps);
     case "toolResult.candidateRefs":
       return assertToolResultCandidateRefs(assertion, steps);
+    case "toolResult.envelope":
+      return assertToolResultEnvelope(assertion, steps);
+    case "agent.recoveryPlan":
+      return assertAgentRecoveryPlan(assertion, steps);
+    case "agent.decisionCards":
+      return assertAgentDecisionCards(assertion);
     case "agent.trace":
       return assertAgentTrace(assertion, steps);
     case "node.count":
@@ -25084,32 +25534,40 @@ function executeHarnessStep(tool, args) {
   if (tool === "agent.invalid_json") {
     const sceneContext = typeof args.sceneContext === "string" ? args.sceneContext : isRecord(args.sceneContext) ? JSON.stringify(args.sceneContext) : null;
     const sceneProgress = parseAgentSceneProgress(sceneContext);
-    const policy = resolveAgentRunPolicy(String(args.userContent ?? ""), null, sceneProgress);
-    const exposure = selectAgentToolsForPolicy(policy, null);
+    const parsedSceneContext = sceneContext ? parseToolResult(sceneContext) : null;
+    const policy = resolveAgentRunPolicy(
+      String(args.userContent ?? ""),
+      null,
+      sceneProgress,
+      isRecord(parsedSceneContext) ? parsedSceneContext : null
+    );
+    const exposure = selectAgentToolsForPolicy(policy, null, isRecord(parsedSceneContext) ? parsedSceneContext : null);
+    const invalidJsonResult = buildInvalidJsonToolResult(String(args.toolName ?? ""), String(args.arguments ?? ""), "Unexpected token");
     return JSON.stringify({
-      success: false,
-      failureKind: "invalid_json",
-      error: "Invalid tool arguments JSON",
-      tool: String(args.toolName ?? ""),
-      arguments: String(args.arguments ?? ""),
-      candidateRefs: {},
-      recommendedNextTool: String(args.toolName ?? ""),
-      retryArgsHint: {},
+      createdNodeIds: [],
+      modifiedNodeIds: [],
+      sceneDelta: { createdNodeIds: [], modifiedNodeIds: [], createdCount: 0, modifiedCount: 0 },
+      suggestedNextTools: [String(args.toolName ?? "")],
+      nextAction: "Call the same exposed tool again with complete valid JSON arguments that match the tool schema.",
+      ...invalidJsonResult,
       agentTrace: createAgentTraceEntry(policy, exposure, "invalid_json", String(args.toolName ?? ""), {
         valid: false,
         failureKind: "invalid_json",
-        errors: ["Unexpected token"]
+        errors: ["Unexpected token"],
+        recoveryPlan: isRecord(invalidJsonResult.recoveryPlan) ? invalidJsonResult.recoveryPlan : void 0
       })
     });
   }
   if (tool === "agent.tool_readiness") {
     const userContent = String(args.userContent ?? "");
-    const lastValidation = isRecord(args.lastValidation) ? args.lastValidation : null;
     const sceneContext = typeof args.sceneContext === "string" ? args.sceneContext : isRecord(args.sceneContext) ? JSON.stringify(args.sceneContext) : executeToolCall("get_scene_info", {});
+    const parsedSceneContext = parseToolResult(sceneContext);
+    const sceneLastValidation = isRecord(parsedSceneContext) && isRecord(parsedSceneContext.lastValidation) ? parsedSceneContext.lastValidation : null;
+    const lastValidation = isRecord(args.lastValidation) ? args.lastValidation : sceneLastValidation;
     const sceneProgress = parseAgentSceneProgress(sceneContext);
-    const policy = resolveAgentRunPolicy(userContent, lastValidation, sceneProgress);
+    const policy = resolveAgentRunPolicy(userContent, lastValidation, sceneProgress, isRecord(parsedSceneContext) ? parsedSceneContext : null);
     const toolArgs = isRecord(args.toolArgs) ? args.toolArgs : {};
-    const readiness = validateToolReadiness(String(args.toolName ?? ""), toolArgs, policy, sceneProgress, lastValidation);
+    const readiness = validateToolReadiness(String(args.toolName ?? ""), toolArgs, policy, sceneProgress, lastValidation, isRecord(parsedSceneContext) ? parsedSceneContext : null);
     return JSON.stringify(readiness.valid ? readiness : buildToolReadinessFailureResult(String(args.toolName ?? ""), readiness));
   }
   return executeToolCall(tool, args);
@@ -25198,11 +25656,13 @@ function assertAgentDeferral(assertion) {
   };
 }
 function assertAgentToolExposure(assertion) {
-  const lastValidation = isRecord(assertion.lastValidation) ? assertion.lastValidation : null;
   const sceneContext = typeof assertion.sceneContext === "string" ? assertion.sceneContext : isRecord(assertion.sceneContext) ? JSON.stringify(assertion.sceneContext) : null;
+  const parsedSceneContext = sceneContext ? parseToolResult(sceneContext) : null;
+  const sceneLastValidation = isRecord(parsedSceneContext) && isRecord(parsedSceneContext.lastValidation) ? parsedSceneContext.lastValidation : null;
+  const lastValidation = isRecord(assertion.lastValidation) ? assertion.lastValidation : sceneLastValidation;
   const sceneProgress = parseAgentSceneProgress(sceneContext);
-  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress);
-  const exposure = selectAgentToolsForPolicy(policy, lastValidation);
+  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress, isRecord(parsedSceneContext) ? parsedSceneContext : null);
+  const exposure = selectAgentToolsForPolicy(policy, lastValidation, isRecord(parsedSceneContext) ? parsedSceneContext : null);
   const exposed = new Set(exposure.exposedToolNames);
   const failures = [];
   if (assertion.phase !== void 0 && policy.phase !== assertion.phase) {
@@ -25224,11 +25684,13 @@ function assertAgentToolExposure(assertion) {
   };
 }
 function assertAgentToolGate(assertion) {
-  const lastValidation = isRecord(assertion.lastValidation) ? assertion.lastValidation : null;
   const sceneContext = typeof assertion.sceneContext === "string" ? assertion.sceneContext : isRecord(assertion.sceneContext) ? JSON.stringify(assertion.sceneContext) : null;
+  const parsedSceneContext = sceneContext ? parseToolResult(sceneContext) : null;
+  const sceneLastValidation = isRecord(parsedSceneContext) && isRecord(parsedSceneContext.lastValidation) ? parsedSceneContext.lastValidation : null;
+  const lastValidation = isRecord(assertion.lastValidation) ? assertion.lastValidation : sceneLastValidation;
   const sceneProgress = parseAgentSceneProgress(sceneContext);
-  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress);
-  const exposure = selectAgentToolsForPolicy(policy, lastValidation);
+  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress, isRecord(parsedSceneContext) ? parsedSceneContext : null);
+  const exposure = selectAgentToolsForPolicy(policy, lastValidation, isRecord(parsedSceneContext) ? parsedSceneContext : null);
   const exposed = exposure.exposedToolNames.includes(assertion.toolName);
   const result = exposed ? null : buildBlockedToolResult(assertion.toolName, policy, exposure, lastValidation);
   const failures = [];
@@ -25330,12 +25792,22 @@ function assertAgentToolContract(assertion) {
     message: failures.length === 0 ? "agent tool contract matched" : failures.join("; ")
   };
 }
+function assertAgentAllToolsHaveContracts() {
+  const missing = findAgentToolsMissingContracts();
+  return {
+    pass: missing.length === 0,
+    type: "agent.allToolsHaveContracts",
+    message: missing.length === 0 ? "all agent tools have explicit contracts" : `missing contracts: ${missing.join(", ")}`
+  };
+}
 function assertAgentToolReadiness(assertion) {
-  const lastValidation = isRecord(assertion.lastValidation) ? assertion.lastValidation : null;
   const sceneContext = typeof assertion.sceneContext === "string" ? assertion.sceneContext : isRecord(assertion.sceneContext) ? JSON.stringify(assertion.sceneContext) : null;
+  const parsedSceneContext = sceneContext ? parseToolResult(sceneContext) : null;
+  const sceneLastValidation = isRecord(parsedSceneContext) && isRecord(parsedSceneContext.lastValidation) ? parsedSceneContext.lastValidation : null;
+  const lastValidation = isRecord(assertion.lastValidation) ? assertion.lastValidation : sceneLastValidation;
   const sceneProgress = parseAgentSceneProgress(sceneContext);
-  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress);
-  const readiness = validateToolReadiness(assertion.toolName, assertion.args, policy, sceneProgress, lastValidation);
+  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress, isRecord(parsedSceneContext) ? parsedSceneContext : null);
+  const readiness = validateToolReadiness(assertion.toolName, assertion.args, policy, sceneProgress, lastValidation, isRecord(parsedSceneContext) ? parsedSceneContext : null);
   const result = readiness.valid ? readiness : buildToolReadinessFailureResult(assertion.toolName, readiness);
   const failures = [];
   const expectedValid = assertion.valid ?? true;
@@ -25390,6 +25862,81 @@ function assertToolResultCandidateRefs(assertion, steps) {
     message: failures.length === 0 ? "candidate refs matched" : failures.join("; ")
   };
 }
+function assertToolResultEnvelope(assertion, steps) {
+  const parsed = steps[assertion.step]?.parsed;
+  if (!isRecord(parsed)) return { pass: false, type: "toolResult.envelope", message: "step result was not an object" };
+  const failures = [];
+  const required2 = [
+    "success",
+    "tool",
+    "createdNodeIds",
+    "modifiedNodeIds",
+    "sceneDelta",
+    "candidateRefs",
+    "suggestedNextTools",
+    "nextAction",
+    ...assertion.mustIncludeFields ?? []
+  ];
+  for (const field of required2) {
+    if (getByPath(parsed, field) === void 0) failures.push(`missing envelope field ${field}`);
+  }
+  if (assertion.success !== void 0 && parsed.success !== assertion.success) {
+    failures.push(`success expected ${assertion.success}, received ${String(parsed.success)}`);
+  }
+  if (parsed.success === false && parsed.failureKind === void 0) failures.push("failureKind missing for failed result");
+  return {
+    pass: failures.length === 0,
+    type: "toolResult.envelope",
+    message: failures.length === 0 ? "tool result envelope matched" : failures.join("; ")
+  };
+}
+function assertAgentRecoveryPlan(assertion, steps) {
+  const plan = getByPath(steps[assertion.step]?.parsed, "recoveryPlan");
+  if (!isRecord(plan)) return { pass: false, type: "agent.recoveryPlan", message: "recoveryPlan was not an object" };
+  const failures = [];
+  if (assertion.recommendedTool !== void 0 && plan.recommendedTool !== assertion.recommendedTool) {
+    failures.push(`recommendedTool expected ${assertion.recommendedTool}, received ${String(plan.recommendedTool)}`);
+  }
+  if (assertion.failureKind !== void 0 && plan.failureKind !== assertion.failureKind) {
+    failures.push(`failureKind expected ${assertion.failureKind}, received ${String(plan.failureKind)}`);
+  }
+  const retryArgs = isRecord(plan.retryArgs) ? plan.retryArgs : {};
+  for (const key of assertion.mustIncludeRetryArgs ?? []) {
+    if (retryArgs[key] === void 0) failures.push(`retryArgs missing ${key}`);
+  }
+  return {
+    pass: failures.length === 0,
+    type: "agent.recoveryPlan",
+    message: failures.length === 0 ? "agent recovery plan matched" : failures.join("; ")
+  };
+}
+function assertAgentDecisionCards(assertion) {
+  const sceneContext = typeof assertion.sceneContext === "string" ? assertion.sceneContext : isRecord(assertion.sceneContext) ? JSON.stringify(assertion.sceneContext) : null;
+  const parsedSceneContext = sceneContext ? parseToolResult(sceneContext) : null;
+  const sceneLastValidation = isRecord(parsedSceneContext) && isRecord(parsedSceneContext.lastValidation) ? parsedSceneContext.lastValidation : null;
+  const lastValidation = isRecord(assertion.lastValidation) ? assertion.lastValidation : sceneLastValidation;
+  const sceneProgress = parseAgentSceneProgress(sceneContext);
+  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress, isRecord(parsedSceneContext) ? parsedSceneContext : null);
+  const exposure = selectAgentToolsForPolicy(policy, lastValidation, isRecord(parsedSceneContext) ? parsedSceneContext : null);
+  const cards = exposure.toolDecisionCards;
+  const tools = new Set(cards.map((card) => card.tool));
+  const failures = [];
+  for (const tool of assertion.mustIncludeTools ?? []) {
+    if (!tools.has(tool)) failures.push(`decisionCards missing ${tool}`);
+  }
+  for (const tool of assertion.mustExcludeTools ?? []) {
+    if (tools.has(tool)) failures.push(`decisionCards should exclude ${tool}`);
+  }
+  for (const tool of assertion.mustIncludeCandidateArgs ?? []) {
+    const card = cards.find((candidate) => candidate.tool === tool);
+    if (!isRecord(card?.candidateArgs)) failures.push(`decisionCards.${tool}.candidateArgs missing`);
+  }
+  return {
+    pass: failures.length === 0,
+    type: "agent.decisionCards",
+    message: failures.length === 0 ? "agent decision cards matched" : failures.join("; ")
+  };
+}
 function assertAgentTrace(assertion, steps) {
   const trace = getByPath(steps[assertion.step]?.parsed, "agentTrace");
   if (!isRecord(trace)) return { pass: false, type: "agent.trace", message: "agentTrace was not an object" };
@@ -25404,6 +25951,32 @@ function assertAgentTrace(assertion, steps) {
   const hidden = Array.isArray(trace.hiddenToolNames) ? trace.hiddenToolNames : [];
   for (const tool of assertion.mustIncludeHidden ?? []) {
     if (!hidden.includes(tool)) failures.push(`hiddenToolNames missing ${tool}`);
+  }
+  const sceneValidationState = isRecord(trace.sceneValidationState) ? trace.sceneValidationState : {};
+  if (assertion.sceneValidationCurrent !== void 0 && sceneValidationState.current !== assertion.sceneValidationCurrent) {
+    failures.push(`sceneValidationState.current expected ${assertion.sceneValidationCurrent}, received ${String(sceneValidationState.current)}`);
+  }
+  if (assertion.sceneValidationStale !== void 0 && sceneValidationState.stale !== assertion.sceneValidationStale) {
+    failures.push(`sceneValidationState.stale expected ${assertion.sceneValidationStale}, received ${String(sceneValidationState.stale)}`);
+  }
+  if (assertion.policySource !== void 0 && trace.policySource !== assertion.policySource) {
+    failures.push(`policySource expected ${assertion.policySource}, received ${String(trace.policySource)}`);
+  }
+  if (assertion.hiddenToolReasonCategory !== void 0) {
+    const categories = isRecord(trace.hiddenToolReasonByCategory) ? trace.hiddenToolReasonByCategory : {};
+    if (typeof categories[assertion.hiddenToolReasonCategory] !== "number") {
+      failures.push(`hiddenToolReasonByCategory missing ${assertion.hiddenToolReasonCategory}`);
+    }
+  }
+  if (assertion.recoveryRecommendedTool !== void 0) {
+    const recoveryPlan = isRecord(trace.recoveryPlan) ? trace.recoveryPlan : {};
+    if (recoveryPlan.recommendedTool !== assertion.recoveryRecommendedTool) {
+      failures.push(`recoveryPlan.recommendedTool expected ${assertion.recoveryRecommendedTool}, received ${String(recoveryPlan.recommendedTool)}`);
+    }
+  }
+  const selectedCandidateArgs = isRecord(trace.selectedCandidateArgs) ? trace.selectedCandidateArgs : {};
+  for (const key of assertion.mustIncludeSelectedCandidateArgs ?? []) {
+    if (selectedCandidateArgs[key] === void 0) failures.push(`selectedCandidateArgs missing ${key}`);
   }
   return {
     pass: failures.length === 0,

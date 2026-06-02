@@ -1,0 +1,29 @@
+{
+  "name": "agent-stale-validation-cache",
+  "description": "Scene changes after validation mark cached blocking reports as stale so Agent does not keep treating old blockers as active.",
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": { "width": 3.2, "depth": 3.2, "addDoor": false, "addWindows": false }
+    },
+    {
+      "tool": "validate_scene",
+      "args": { "codeProfile": "china_residential" }
+    },
+    {
+      "tool": "add_door_to_wall",
+      "args": { "wallId": { "fromStep": 0, "path": "createdByType.wall.0" }, "width": 0.9 }
+    },
+    {
+      "tool": "get_scene_info",
+      "args": {}
+    }
+  ],
+  "assertions": [
+    { "type": "toolResult.field", "step": 1, "path": "blocking", "expected": true },
+    { "type": "toolResult.field", "step": 3, "path": "lastValidation.stale", "expected": true },
+    { "type": "toolResult.field", "step": 3, "path": "lastValidation.current", "expected": false },
+    { "type": "toolResult.field", "step": 3, "path": "agentNextActions.primary", "expected": "validate_scene" },
+    { "type": "toolResult.field", "step": 3, "path": "agentNextActions.blockedBy", "expected": null }
+  ]
+}

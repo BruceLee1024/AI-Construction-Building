@@ -6,9 +6,11 @@ import { executeToolCall } from '../../packages/editor/src/lib/agent/executor'
 import {
   parseAgentSceneProgress,
   buildBlockedToolResult,
+  buildInvalidJsonToolResult,
   buildInvalidToolArgumentsResult,
   buildToolReadinessFailureResult,
   createAgentTraceEntry,
+  findAgentToolsMissingContracts,
   getAgentToolContract,
   resolveAgentRunPolicy,
   selectAgentToolsForPolicy,
@@ -270,12 +272,20 @@ function evaluateAssertion(
       return assertAgentToolArgsFromStep(assertion, steps)
     case 'agent.toolContract':
       return assertAgentToolContract(assertion)
+    case 'agent.allToolsHaveContracts':
+      return assertAgentAllToolsHaveContracts()
     case 'agent.toolReadiness':
       return assertAgentToolReadiness(assertion)
     case 'toolResult.failureShape':
       return assertToolResultFailureShape(assertion, steps)
     case 'toolResult.candidateRefs':
       return assertToolResultCandidateRefs(assertion, steps)
+    case 'toolResult.envelope':
+      return assertToolResultEnvelope(assertion, steps)
+    case 'agent.recoveryPlan':
+      return assertAgentRecoveryPlan(assertion, steps)
+    case 'agent.decisionCards':
+      return assertAgentDecisionCards(assertion)
     case 'agent.trace':
       return assertAgentTrace(assertion, steps)
     case 'node.count':
@@ -322,38 +332,48 @@ function executeHarnessStep(tool: string, args: Record<string, JsonValue>): stri
       ? JSON.stringify(args.sceneContext)
       : null
     const sceneProgress = parseAgentSceneProgress(sceneContext)
-    const policy = resolveAgentRunPolicy(String(args.userContent ?? ''), null, sceneProgress)
-    const exposure = selectAgentToolsForPolicy(policy, null)
+    const parsedSceneContext = sceneContext ? parseToolResult(sceneContext) : null
+    const policy = resolveAgentRunPolicy(
+      String(args.userContent ?? ''),
+      null,
+      sceneProgress,
+      isRecord(parsedSceneContext) ? parsedSceneContext : null,
+    )
+    const exposure = selectAgentToolsForPolicy(policy, null, isRecord(parsedSceneContext) ? parsedSceneContext : null)
+    const invalidJsonResult = buildInvalidJsonToolResult(String(args.toolName ?? ''), String(args.arguments ?? ''), 'Unexpected token')
     return JSON.stringify({
-      success: false,
-      failureKind: 'invalid_json',
-      error: 'Invalid tool arguments JSON',
-      tool: String(args.toolName ?? ''),
-      arguments: String(args.arguments ?? ''),
-      candidateRefs: {},
-      recommendedNextTool: String(args.toolName ?? ''),
-      retryArgsHint: {},
+      createdNodeIds: [],
+      modifiedNodeIds: [],
+      sceneDelta: { createdNodeIds: [], modifiedNodeIds: [], createdCount: 0, modifiedCount: 0 },
+      suggestedNextTools: [String(args.toolName ?? '')],
+      nextAction: 'Call the same exposed tool again with complete valid JSON arguments that match the tool schema.',
+      ...invalidJsonResult,
       agentTrace: createAgentTraceEntry(policy, exposure, 'invalid_json', String(args.toolName ?? ''), {
         valid: false,
         failureKind: 'invalid_json',
         errors: ['Unexpected token'],
+        recoveryPlan: isRecord(invalidJsonResult.recoveryPlan) ? invalidJsonResult.recoveryPlan as never : undefined,
       }),
     })
   }
   if (tool === 'agent.tool_readiness') {
     const userContent = String(args.userContent ?? '')
-    const lastValidation = isRecord(args.lastValidation)
-      ? args.lastValidation as unknown as Parameters<typeof resolveAgentRunPolicy>[1]
-      : null
     const sceneContext = typeof args.sceneContext === 'string'
       ? args.sceneContext
       : isRecord(args.sceneContext)
       ? JSON.stringify(args.sceneContext)
       : executeToolCall('get_scene_info', {})
+    const parsedSceneContext = parseToolResult(sceneContext)
+    const sceneLastValidation = isRecord(parsedSceneContext) && isRecord(parsedSceneContext.lastValidation)
+      ? parsedSceneContext.lastValidation as unknown as Parameters<typeof resolveAgentRunPolicy>[1]
+      : null
+    const lastValidation = isRecord(args.lastValidation)
+      ? args.lastValidation as unknown as Parameters<typeof resolveAgentRunPolicy>[1]
+      : sceneLastValidation
     const sceneProgress = parseAgentSceneProgress(sceneContext)
-    const policy = resolveAgentRunPolicy(userContent, lastValidation, sceneProgress)
+    const policy = resolveAgentRunPolicy(userContent, lastValidation, sceneProgress, isRecord(parsedSceneContext) ? parsedSceneContext : null)
     const toolArgs = isRecord(args.toolArgs) ? args.toolArgs as Record<string, unknown> : {}
-    const readiness = validateToolReadiness(String(args.toolName ?? ''), toolArgs, policy, sceneProgress, lastValidation)
+    const readiness = validateToolReadiness(String(args.toolName ?? ''), toolArgs, policy, sceneProgress, lastValidation, isRecord(parsedSceneContext) ? parsedSceneContext : null)
     return JSON.stringify(readiness.valid ? readiness : buildToolReadinessFailureResult(String(args.toolName ?? ''), readiness))
   }
   return executeToolCall(tool, args)
@@ -466,17 +486,21 @@ function assertAgentDeferral(
 function assertAgentToolExposure(
   assertion: Extract<HarnessAssertion, { type: 'agent.toolExposure' }>,
 ): AssertionResult {
-  const lastValidation = isRecord(assertion.lastValidation)
-    ? assertion.lastValidation as unknown as Parameters<typeof resolveAgentRunPolicy>[1]
-    : null
   const sceneContext = typeof assertion.sceneContext === 'string'
     ? assertion.sceneContext
     : isRecord(assertion.sceneContext)
     ? JSON.stringify(assertion.sceneContext)
     : null
+  const parsedSceneContext = sceneContext ? parseToolResult(sceneContext) : null
+  const sceneLastValidation = isRecord(parsedSceneContext) && isRecord(parsedSceneContext.lastValidation)
+    ? parsedSceneContext.lastValidation as unknown as Parameters<typeof resolveAgentRunPolicy>[1]
+    : null
+  const lastValidation = isRecord(assertion.lastValidation)
+    ? assertion.lastValidation as unknown as Parameters<typeof resolveAgentRunPolicy>[1]
+    : sceneLastValidation
   const sceneProgress = parseAgentSceneProgress(sceneContext)
-  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress)
-  const exposure = selectAgentToolsForPolicy(policy, lastValidation)
+  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress, isRecord(parsedSceneContext) ? parsedSceneContext : null)
+  const exposure = selectAgentToolsForPolicy(policy, lastValidation, isRecord(parsedSceneContext) ? parsedSceneContext : null)
   const exposed = new Set(exposure.exposedToolNames)
   const failures: string[] = []
 
@@ -505,17 +529,21 @@ function assertAgentToolExposure(
 function assertAgentToolGate(
   assertion: Extract<HarnessAssertion, { type: 'agent.toolGate' }>,
 ): AssertionResult {
-  const lastValidation = isRecord(assertion.lastValidation)
-    ? assertion.lastValidation as unknown as Parameters<typeof resolveAgentRunPolicy>[1]
-    : null
   const sceneContext = typeof assertion.sceneContext === 'string'
     ? assertion.sceneContext
     : isRecord(assertion.sceneContext)
     ? JSON.stringify(assertion.sceneContext)
     : null
+  const parsedSceneContext = sceneContext ? parseToolResult(sceneContext) : null
+  const sceneLastValidation = isRecord(parsedSceneContext) && isRecord(parsedSceneContext.lastValidation)
+    ? parsedSceneContext.lastValidation as unknown as Parameters<typeof resolveAgentRunPolicy>[1]
+    : null
+  const lastValidation = isRecord(assertion.lastValidation)
+    ? assertion.lastValidation as unknown as Parameters<typeof resolveAgentRunPolicy>[1]
+    : sceneLastValidation
   const sceneProgress = parseAgentSceneProgress(sceneContext)
-  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress)
-  const exposure = selectAgentToolsForPolicy(policy, lastValidation)
+  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress, isRecord(parsedSceneContext) ? parsedSceneContext : null)
+  const exposure = selectAgentToolsForPolicy(policy, lastValidation, isRecord(parsedSceneContext) ? parsedSceneContext : null)
   const exposed = exposure.exposedToolNames.includes(assertion.toolName)
   const result = exposed ? null : buildBlockedToolResult(assertion.toolName, policy, exposure, lastValidation)
   const failures: string[] = []
@@ -632,20 +660,33 @@ function assertAgentToolContract(
   }
 }
 
+function assertAgentAllToolsHaveContracts(): AssertionResult {
+  const missing = findAgentToolsMissingContracts()
+  return {
+    pass: missing.length === 0,
+    type: 'agent.allToolsHaveContracts',
+    message: missing.length === 0 ? 'all agent tools have explicit contracts' : `missing contracts: ${missing.join(', ')}`,
+  }
+}
+
 function assertAgentToolReadiness(
   assertion: Extract<HarnessAssertion, { type: 'agent.toolReadiness' }>,
 ): AssertionResult {
-  const lastValidation = isRecord(assertion.lastValidation)
-    ? assertion.lastValidation as unknown as Parameters<typeof resolveAgentRunPolicy>[1]
-    : null
   const sceneContext = typeof assertion.sceneContext === 'string'
     ? assertion.sceneContext
     : isRecord(assertion.sceneContext)
     ? JSON.stringify(assertion.sceneContext)
     : null
+  const parsedSceneContext = sceneContext ? parseToolResult(sceneContext) : null
+  const sceneLastValidation = isRecord(parsedSceneContext) && isRecord(parsedSceneContext.lastValidation)
+    ? parsedSceneContext.lastValidation as unknown as Parameters<typeof resolveAgentRunPolicy>[1]
+    : null
+  const lastValidation = isRecord(assertion.lastValidation)
+    ? assertion.lastValidation as unknown as Parameters<typeof resolveAgentRunPolicy>[1]
+    : sceneLastValidation
   const sceneProgress = parseAgentSceneProgress(sceneContext)
-  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress)
-  const readiness = validateToolReadiness(assertion.toolName, assertion.args as Record<string, unknown>, policy, sceneProgress, lastValidation)
+  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress, isRecord(parsedSceneContext) ? parsedSceneContext : null)
+  const readiness = validateToolReadiness(assertion.toolName, assertion.args as Record<string, unknown>, policy, sceneProgress, lastValidation, isRecord(parsedSceneContext) ? parsedSceneContext : null)
   const result = readiness.valid ? readiness : buildToolReadinessFailureResult(assertion.toolName, readiness)
   const failures: string[] = []
   const expectedValid = assertion.valid ?? true
@@ -709,6 +750,100 @@ function assertToolResultCandidateRefs(
   }
 }
 
+function assertToolResultEnvelope(
+  assertion: Extract<HarnessAssertion, { type: 'toolResult.envelope' }>,
+  steps: StepResult[],
+): AssertionResult {
+  const parsed = steps[assertion.step]?.parsed
+  if (!isRecord(parsed)) return { pass: false, type: 'toolResult.envelope', message: 'step result was not an object' }
+  const failures: string[] = []
+  const required = [
+    'success',
+    'tool',
+    'createdNodeIds',
+    'modifiedNodeIds',
+    'sceneDelta',
+    'candidateRefs',
+    'suggestedNextTools',
+    'nextAction',
+    ...(assertion.mustIncludeFields ?? []),
+  ]
+  for (const field of required) {
+    if (getByPath(parsed, field) === undefined) failures.push(`missing envelope field ${field}`)
+  }
+  if (assertion.success !== undefined && parsed.success !== assertion.success) {
+    failures.push(`success expected ${assertion.success}, received ${String(parsed.success)}`)
+  }
+  if (parsed.success === false && parsed.failureKind === undefined) failures.push('failureKind missing for failed result')
+  return {
+    pass: failures.length === 0,
+    type: 'toolResult.envelope',
+    message: failures.length === 0 ? 'tool result envelope matched' : failures.join('; '),
+  }
+}
+
+function assertAgentRecoveryPlan(
+  assertion: Extract<HarnessAssertion, { type: 'agent.recoveryPlan' }>,
+  steps: StepResult[],
+): AssertionResult {
+  const plan = getByPath(steps[assertion.step]?.parsed, 'recoveryPlan')
+  if (!isRecord(plan)) return { pass: false, type: 'agent.recoveryPlan', message: 'recoveryPlan was not an object' }
+  const failures: string[] = []
+  if (assertion.recommendedTool !== undefined && plan.recommendedTool !== assertion.recommendedTool) {
+    failures.push(`recommendedTool expected ${assertion.recommendedTool}, received ${String(plan.recommendedTool)}`)
+  }
+  if (assertion.failureKind !== undefined && plan.failureKind !== assertion.failureKind) {
+    failures.push(`failureKind expected ${assertion.failureKind}, received ${String(plan.failureKind)}`)
+  }
+  const retryArgs = isRecord(plan.retryArgs) ? plan.retryArgs : {}
+  for (const key of assertion.mustIncludeRetryArgs ?? []) {
+    if (retryArgs[key] === undefined) failures.push(`retryArgs missing ${key}`)
+  }
+  return {
+    pass: failures.length === 0,
+    type: 'agent.recoveryPlan',
+    message: failures.length === 0 ? 'agent recovery plan matched' : failures.join('; '),
+  }
+}
+
+function assertAgentDecisionCards(
+  assertion: Extract<HarnessAssertion, { type: 'agent.decisionCards' }>,
+): AssertionResult {
+  const sceneContext = typeof assertion.sceneContext === 'string'
+    ? assertion.sceneContext
+    : isRecord(assertion.sceneContext)
+    ? JSON.stringify(assertion.sceneContext)
+    : null
+  const parsedSceneContext = sceneContext ? parseToolResult(sceneContext) : null
+  const sceneLastValidation = isRecord(parsedSceneContext) && isRecord(parsedSceneContext.lastValidation)
+    ? parsedSceneContext.lastValidation as unknown as Parameters<typeof resolveAgentRunPolicy>[1]
+    : null
+  const lastValidation = isRecord(assertion.lastValidation)
+    ? assertion.lastValidation as unknown as Parameters<typeof resolveAgentRunPolicy>[1]
+    : sceneLastValidation
+  const sceneProgress = parseAgentSceneProgress(sceneContext)
+  const policy = resolveAgentRunPolicy(assertion.userContent, lastValidation, sceneProgress, isRecord(parsedSceneContext) ? parsedSceneContext : null)
+  const exposure = selectAgentToolsForPolicy(policy, lastValidation, isRecord(parsedSceneContext) ? parsedSceneContext : null)
+  const cards = exposure.toolDecisionCards
+  const tools = new Set(cards.map((card) => card.tool))
+  const failures: string[] = []
+  for (const tool of assertion.mustIncludeTools ?? []) {
+    if (!tools.has(tool)) failures.push(`decisionCards missing ${tool}`)
+  }
+  for (const tool of assertion.mustExcludeTools ?? []) {
+    if (tools.has(tool)) failures.push(`decisionCards should exclude ${tool}`)
+  }
+  for (const tool of assertion.mustIncludeCandidateArgs ?? []) {
+    const card = cards.find((candidate) => candidate.tool === tool)
+    if (!isRecord(card?.candidateArgs)) failures.push(`decisionCards.${tool}.candidateArgs missing`)
+  }
+  return {
+    pass: failures.length === 0,
+    type: 'agent.decisionCards',
+    message: failures.length === 0 ? 'agent decision cards matched' : failures.join('; '),
+  }
+}
+
 function assertAgentTrace(
   assertion: Extract<HarnessAssertion, { type: 'agent.trace' }>,
   steps: StepResult[],
@@ -726,6 +861,32 @@ function assertAgentTrace(
   const hidden = Array.isArray(trace.hiddenToolNames) ? trace.hiddenToolNames : []
   for (const tool of assertion.mustIncludeHidden ?? []) {
     if (!hidden.includes(tool)) failures.push(`hiddenToolNames missing ${tool}`)
+  }
+  const sceneValidationState = isRecord(trace.sceneValidationState) ? trace.sceneValidationState : {}
+  if (assertion.sceneValidationCurrent !== undefined && sceneValidationState.current !== assertion.sceneValidationCurrent) {
+    failures.push(`sceneValidationState.current expected ${assertion.sceneValidationCurrent}, received ${String(sceneValidationState.current)}`)
+  }
+  if (assertion.sceneValidationStale !== undefined && sceneValidationState.stale !== assertion.sceneValidationStale) {
+    failures.push(`sceneValidationState.stale expected ${assertion.sceneValidationStale}, received ${String(sceneValidationState.stale)}`)
+  }
+  if (assertion.policySource !== undefined && trace.policySource !== assertion.policySource) {
+    failures.push(`policySource expected ${assertion.policySource}, received ${String(trace.policySource)}`)
+  }
+  if (assertion.hiddenToolReasonCategory !== undefined) {
+    const categories = isRecord(trace.hiddenToolReasonByCategory) ? trace.hiddenToolReasonByCategory : {}
+    if (typeof categories[assertion.hiddenToolReasonCategory] !== 'number') {
+      failures.push(`hiddenToolReasonByCategory missing ${assertion.hiddenToolReasonCategory}`)
+    }
+  }
+  if (assertion.recoveryRecommendedTool !== undefined) {
+    const recoveryPlan = isRecord(trace.recoveryPlan) ? trace.recoveryPlan : {}
+    if (recoveryPlan.recommendedTool !== assertion.recoveryRecommendedTool) {
+      failures.push(`recoveryPlan.recommendedTool expected ${assertion.recoveryRecommendedTool}, received ${String(recoveryPlan.recommendedTool)}`)
+    }
+  }
+  const selectedCandidateArgs = isRecord(trace.selectedCandidateArgs) ? trace.selectedCandidateArgs : {}
+  for (const key of assertion.mustIncludeSelectedCandidateArgs ?? []) {
+    if (selectedCandidateArgs[key] === undefined) failures.push(`selectedCandidateArgs missing ${key}`)
   }
   return {
     pass: failures.length === 0,

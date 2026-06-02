@@ -1,0 +1,116 @@
+{
+  "name": "agent-tool-envelope-recovery-cards",
+  "description": "Tool results use a common envelope, failures include recovery plans, and decision cards carry candidate args.",
+  "steps": [
+    {
+      "tool": "create_room",
+      "args": {
+        "width": 4.8,
+        "depth": 3.6,
+        "addDoor": true,
+        "addWindows": true
+      }
+    },
+    {
+      "tool": "agent.tool_readiness",
+      "args": {
+        "toolName": "add_window_to_wall",
+        "userContent": "继续优化开窗",
+        "sceneContext": {
+          "fromStep": 0,
+          "path": "$"
+        },
+        "toolArgs": {
+          "width": 1.5
+        }
+      }
+    },
+    {
+      "tool": "agent.tool_readiness",
+      "args": {
+        "toolName": "place_furniture_solved",
+        "userContent": "给卧室摆放床和衣柜",
+        "sceneContext": {
+          "fromStep": 0,
+          "path": "$"
+        },
+        "toolArgs": {
+          "roomType": "bedroom"
+        }
+      }
+    },
+    {
+      "tool": "agent.invalid_json",
+      "args": {
+        "toolName": "place_furniture_solved",
+        "userContent": "给卧室摆放家具",
+        "arguments": "{ roomType: bedroom",
+        "sceneContext": {
+          "fromStep": 0,
+          "path": "$"
+        }
+      }
+    }
+  ],
+  "assertions": [
+    {
+      "type": "toolResult.envelope",
+      "step": 0,
+      "success": true
+    },
+    {
+      "type": "toolResult.envelope",
+      "step": 1,
+      "success": false,
+      "mustIncludeFields": ["recoveryPlan"]
+    },
+    {
+      "type": "agent.recoveryPlan",
+      "step": 1,
+      "failureKind": "missing_scene_prerequisite",
+      "recommendedTool": "get_scene_info",
+      "mustIncludeRetryArgs": ["wallId"]
+    },
+    {
+      "type": "agent.recoveryPlan",
+      "step": 2,
+      "failureKind": "missing_scene_prerequisite",
+      "recommendedTool": "suggest_furniture_layout",
+      "mustIncludeRetryArgs": ["slabId", "roomType"]
+    },
+    {
+      "type": "toolResult.envelope",
+      "step": 3,
+      "success": false,
+      "mustIncludeFields": ["recoveryPlan", "agentTrace"]
+    },
+    {
+      "type": "agent.trace",
+      "step": 3,
+      "gateDecision": "invalid_json",
+      "recoveryRecommendedTool": "place_furniture_solved"
+    },
+    {
+      "type": "agent.decisionCards",
+      "userContent": "给卧室摆放床和衣柜",
+      "sceneContext": {
+        "summary": { "walls": 4, "slabs": 1, "doors": 1, "windows": 1, "zones": 1, "roofs": 0, "items": 0, "rooms": 1 },
+        "architecturalSummary": {
+          "spaces": [
+            { "slabId": "slab_1", "roomType": "bedroom", "needsOpeningAttention": false }
+          ]
+        },
+        "agentNextActions": {
+          "primary": "solve_furniture",
+          "candidateArgs": {
+            "suggest_furniture_layout": { "slabId": "slab_1", "roomType": "bedroom" },
+            "place_furniture_solved": { "slabId": "slab_1", "roomType": "bedroom" }
+          }
+        }
+      },
+      "mustIncludeTools": ["suggest_furniture_layout", "place_furniture_solved"],
+      "mustExcludeTools": ["place_furniture", "create_roof"],
+      "mustIncludeCandidateArgs": ["suggest_furniture_layout", "place_furniture_solved"]
+    }
+  ]
+}

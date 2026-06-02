@@ -111,6 +111,10 @@ export type AgentToolContractAssertion = {
   requiresNonBlockingValidation?: boolean
 }
 
+export type AgentAllToolsHaveContractsAssertion = {
+  type: 'agent.allToolsHaveContracts'
+}
+
 export type AgentToolReadinessAssertion = {
   type: 'agent.toolReadiness'
   toolName: string
@@ -138,6 +142,31 @@ export type ToolResultCandidateRefsAssertion = {
   mustInclude?: Array<'slabs' | 'walls' | 'nodes'>
 }
 
+export type ToolResultEnvelopeAssertion = {
+  type: 'toolResult.envelope'
+  step: number
+  success?: boolean
+  mustIncludeFields?: string[]
+}
+
+export type AgentRecoveryPlanAssertion = {
+  type: 'agent.recoveryPlan'
+  step: number
+  recommendedTool?: string
+  failureKind?: string
+  mustIncludeRetryArgs?: string[]
+}
+
+export type AgentDecisionCardsAssertion = {
+  type: 'agent.decisionCards'
+  userContent: string
+  lastValidation?: Record<string, JsonValue>
+  sceneContext?: string | Record<string, JsonValue>
+  mustIncludeTools?: string[]
+  mustExcludeTools?: string[]
+  mustIncludeCandidateArgs?: string[]
+}
+
 export type AgentTraceAssertion = {
   type: 'agent.trace'
   step: number
@@ -146,6 +175,12 @@ export type AgentTraceAssertion = {
   toolCall?: string
   mustIncludeExposed?: string[]
   mustIncludeHidden?: string[]
+  sceneValidationCurrent?: boolean
+  sceneValidationStale?: boolean
+  policySource?: string
+  hiddenToolReasonCategory?: string
+  recoveryRecommendedTool?: string
+  mustIncludeSelectedCandidateArgs?: string[]
 }
 
 export type NodeCountAssertion = {
@@ -239,9 +274,13 @@ export type HarnessAssertion =
   | AgentToolArgsAssertion
   | AgentToolArgsFromStepAssertion
   | AgentToolContractAssertion
+  | AgentAllToolsHaveContractsAssertion
   | AgentToolReadinessAssertion
   | ToolResultFailureShapeAssertion
   | ToolResultCandidateRefsAssertion
+  | ToolResultEnvelopeAssertion
+  | AgentRecoveryPlanAssertion
+  | AgentDecisionCardsAssertion
   | AgentTraceAssertion
   | NodeCountAssertion
   | NodeExistsAssertion

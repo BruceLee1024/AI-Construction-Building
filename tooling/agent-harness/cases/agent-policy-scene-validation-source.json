@@ -1,0 +1,71 @@
+{
+  "name": "agent-policy-scene-validation-source",
+  "description": "Agent policy uses current validation from scene context as the source of truth, and ignores stale validation blockers.",
+  "steps": [
+    {
+      "tool": "get_scene_info",
+      "args": {}
+    }
+  ],
+  "assertions": [
+    {
+      "type": "agent.toolExposure",
+      "userContent": "继续给住宅摆家具",
+      "sceneContext": {
+        "summary": { "walls": 4, "slabs": 1, "doors": 1, "windows": 1, "zones": 1, "roofs": 0, "items": 0, "rooms": 1 },
+        "architecturalSummary": {
+          "spaces": [
+            { "slabId": "slab_1", "needsOpeningAttention": false }
+          ]
+        },
+        "lastValidation": {
+          "valid": false,
+          "blocking": true,
+          "fixedCount": 0,
+          "warningCount": 1,
+          "blockingRuleIds": ["room.main_space_daylight"],
+          "issues": [],
+          "repairHints": [
+            {
+              "ruleId": "room.main_space_daylight",
+              "nodeId": "slab_1",
+              "preferredTools": ["add_window_to_wall", "auto_align_windows", "place_furniture_solved"],
+              "suggestedAction": "Add exterior window area before furnishing."
+            }
+          ],
+          "current": true,
+          "stale": false
+        }
+      },
+      "phase": "validation_repair",
+      "mustExpose": ["add_window_to_wall", "auto_align_windows", "place_furniture_solved", "validate_scene"],
+      "mustHide": ["place_furniture", "create_roof"]
+    },
+    {
+      "type": "agent.toolExposure",
+      "userContent": "继续给住宅摆家具",
+      "sceneContext": {
+        "summary": { "walls": 4, "slabs": 1, "doors": 1, "windows": 1, "zones": 1, "roofs": 0, "items": 0, "rooms": 1 },
+        "architecturalSummary": {
+          "spaces": [
+            { "slabId": "slab_1", "needsOpeningAttention": false }
+          ]
+        },
+        "lastValidation": {
+          "valid": false,
+          "blocking": true,
+          "fixedCount": 0,
+          "warningCount": 1,
+          "blockingRuleIds": ["room.main_space_daylight"],
+          "issues": [],
+          "repairHints": [],
+          "current": false,
+          "stale": true
+        }
+      },
+      "phase": "furnishing",
+      "mustExpose": ["validate_scene", "suggest_furniture_layout", "place_furniture_solved"],
+      "mustHide": ["place_furniture", "create_roof"]
+    }
+  ]
+}

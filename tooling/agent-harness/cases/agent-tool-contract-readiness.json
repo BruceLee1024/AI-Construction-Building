@@ -54,6 +54,9 @@
   ],
   "assertions": [
     {
+      "type": "agent.allToolsHaveContracts"
+    },
+    {
       "type": "agent.toolContract",
       "toolName": "place_furniture_solved",
       "phases": [
